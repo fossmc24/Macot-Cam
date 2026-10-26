@@ -267,27 +267,27 @@
           g.restore();
         });
       }},
-      { id: 'dogEars', name: 'Floppy ears', tip: 'shake your head', color: '#8a5a32', cy: 0.3, r: 0.72, draw(g, s, c, f) {
-        both(k => {
-          g.save(); g.translate(k * s * .47, s * .08);
-          g.rotate(-k * f.brow * .55 + f.swing * 1.1 + f.bounce * k * .4);        // swings with your head
-          g.beginPath();
-          g.moveTo(-s * .06, 0);
-          g.bezierCurveTo(-s * .2, s * .15, -s * .16, s * .5, 0, s * .52);
-          g.bezierCurveTo(s * .16, s * .5, s * .18, s * .15, s * .06, 0);
-          g.closePath();
-          g.fillStyle = c; g.fill(); g.strokeStyle = shade(c, -.3); g.lineWidth = s * .012; g.stroke();
-          g.restore();
-        });
+      // "side" ears attach to each side of your face at ear level (one ear per side, drawn
+      // pointing outward). hit = tap area for one ear; cy/r frame the pair in the tray picture.
+      { id: 'dogEars', name: 'Floppy ears', tip: 'shake your head', color: '#8a5a32', side: true, cy: 0.2, r: 0.75,
+        hit: { cx: .04, cy: .22, r: .32 }, draw(g, s, c, f) {
+        g.save(); g.translate(0, -s * .1);                                      // hinge near the top of your ear
+        g.rotate(-f.brow * .5 - f.bounce * .4 + f.swing * 1.1 * f.sx);          // swings with your head
+        g.beginPath();
+        g.moveTo(-s * .05, 0);
+        g.bezierCurveTo(-s * .17, s * .18, -s * .13, s * .6, s * .05, s * .62);
+        g.bezierCurveTo(s * .22, s * .6, s * .21, s * .18, s * .07, 0);
+        g.closePath();
+        g.fillStyle = c; g.fill(); g.strokeStyle = shade(c, -.3); g.lineWidth = s * .012; g.stroke();
+        g.restore();
       }},
-      { id: 'elephantEars', name: 'Elephant ears', tip: 'raise your eyebrows to flap', color: '#9aa0a6', cy: 0.12, r: 0.82, draw(g, s, c, f) {
+      { id: 'elephantEars', name: 'Elephant ears', tip: 'raise your eyebrows to flap', color: '#9aa0a6', side: true, cy: 0.05, r: 0.85,
+        hit: { cx: .2, cy: .05, r: .36 }, draw(g, s, c, f) {
         const flap = 1 + Math.sin(f.t * 12) * .3 * f.brow + Math.abs(f.swing) * .3;
-        both(k => {
-          g.save(); g.translate(k * s * .45, s * .1); g.scale(flap, 1);
-          g.beginPath(); g.ellipse(k * s * .2, 0, s * .24, s * .33, 0, 0, Math.PI * 2); g.fillStyle = c; g.fill();
-          g.beginPath(); g.ellipse(k * s * .2, 0, s * .15, s * .23, 0, 0, Math.PI * 2); g.fillStyle = '#e7b3bb'; g.fill();
-          g.restore();
-        });
+        g.save(); g.scale(flap, 1);                                              // flaps outward from the side of your face
+        g.beginPath(); g.ellipse(s * .2, s * .05, s * .24, s * .33, 0, 0, Math.PI * 2); g.fillStyle = c; g.fill();
+        g.beginPath(); g.ellipse(s * .2, s * .05, s * .15, s * .23, 0, 0, Math.PI * 2); g.fillStyle = '#e7b3bb'; g.fill();
+        g.restore();
       }},
       { id: 'mouseEars', name: 'Mouse ears', tip: 'move your head', color: '#1b1b1b', cy: -0.32, r: 0.66, draw(g, s, c, f) {
         both(k => {
@@ -516,7 +516,7 @@
   // Listed in drawing order (first = furthest back).
   const SLOTS = [
     { key: 'facial', label: 'Facial hair', anchors: [p => p[13]] },
-    { key: 'ears',   label: 'Ears',        anchors: [p => p[10]] },
+    { key: 'ears',   label: 'Ears',        anchors: [p => p[10]], sideAnchors: [p => p[234], p => p[454]] },
     { key: 'cheeks', label: 'Cheeks',      anchors: [p => p[205], p => p[425]] },
     { key: 'nose',   label: 'Nose',        anchors: [p => p[1]] },
     { key: 'mouth',  label: 'Mouth',       anchors: [p => mid(p[13], p[14])] },
@@ -557,9 +557,11 @@
       // Older saves kept ears under "head" — move them to "ears".
       if (saved.head && saved.head.part && !findPart('head', saved.head.part) && findPart('ears', saved.head.part)) { saved.ears = saved.head; saved.head = null; }
       for (const s of SLOTS) mascot[s.key] = (saved[s.key] && (!saved[s.key].part || findPart(s.key, saved[s.key].part))) ? saved[s.key] : blankSlot();
+      // Floppy/elephant ears moved to new attachment points — clear old position tweaks once.
+      if (!(saved.v >= 2) && mascot.ears.part && findPart('ears', mascot.ears.part).side) Object.assign(mascot.ears, { dx: 0, dy: 0, scale: 1 });
     }
   } catch (_) {}
-  const save = () => { try { localStorage.setItem('mascot-v1', JSON.stringify(mascot)); } catch (_) {} };
+  const save = () => { try { localStorage.setItem('mascot-v1', JSON.stringify({ ...mascot, v: 2 })); } catch (_) {} };
 
   // =====================================================================
   //  FACE TRACKER
@@ -726,7 +728,16 @@
       if (!st || !st.part) continue;
       const part = findPart(slot.key, st.part);
       if (!part) continue;
-      slot.anchors.forEach((getAnchor, inst) => fn(slot, st, part, getAnchor(pts), inst, inst === 1 ? -1 : 1));
+      if (part.side && slot.sideAnchors) {
+        // One ear per side of the face; flip it so it always points away from your nose.
+        const ex = Math.cos(faceM.angle), ey = Math.sin(faceM.angle), nose = pts[1];
+        slot.sideAnchors.forEach((getAnchor, inst) => {
+          const a = getAnchor(pts);
+          fn(slot, st, part, a, inst, ((a.x - nose.x) * ex + (a.y - nose.y) * ey) >= 0 ? 1 : -1);
+        });
+      } else {
+        slot.anchors.forEach((getAnchor, inst) => fn(slot, st, part, getAnchor(pts), inst, inst === 1 ? -1 : 1));
+      }
     }
   }
 
@@ -744,6 +755,7 @@
     eachInstance((slot, st, part, anchor, inst, sx) => {
       ctx.save();
       applyTransform(ctx, anchor, sx, st);
+      f.sx = sx;
       part.draw(ctx, faceM.size, st.color || part.color, f);
       ctx.restore();
     });
@@ -752,9 +764,10 @@
   // Centre + radius of a part on screen, for tapping it.
   function hitCircle(part, st, anchor, sx) {
     const s = faceM.size;
-    const lx = sx * (st.dx * s), ly = st.dy * s + part.cy * s * st.scale;
+    const h = part.hit || { cx: 0, cy: part.cy, r: part.r };
+    const lx = sx * (st.dx * s + h.cx * s * st.scale), ly = st.dy * s + h.cy * s * st.scale;
     const c = Math.cos(faceM.angle), n = Math.sin(faceM.angle);
-    return { x: anchor.x + lx * c - ly * n, y: anchor.y + lx * n + ly * c, r: part.r * s * st.scale };
+    return { x: anchor.x + lx * c - ly * n, y: anchor.y + lx * n + ly * c, r: h.r * s * st.scale };
   }
 
   function drawSelection() {
@@ -809,7 +822,7 @@
     eachInstance((slot, st, part, anchor, inst, sx) => {
       const hc = hitCircle(part, st, anchor, sx);
       const slack = 24 / p.k;                     // a little forgiveness for fingers
-      if (dist(p, hc) <= hc.r + slack && (!best || hc.r < best.r)) best = { slot: slot.key, inst, r: hc.r };
+      if (dist(p, hc) <= hc.r + slack && (!best || hc.r < best.r)) best = { slot: slot.key, inst, r: hc.r, sx };
     });
     return best;
   }
@@ -825,7 +838,7 @@
       if (hit) {
         selected = { slot: hit.slot, inst: hit.inst };
         const st = mascot[hit.slot];
-        drag = { x: e.clientX, y: e.clientY, dx: st.dx, dy: st.dy, sx: hit.inst === 1 ? -1 : 1 };
+        drag = { x: e.clientX, y: e.clientY, dx: st.dx, dy: st.dy, sx: hit.sx };
         showTab(hit.slot, false);
       } else {
         selected = null; drag = null;
@@ -898,7 +911,14 @@
     const s = (c.width * .44) / part.r;
     g.translate(c.width / 2, c.height / 2 - part.cy * s);
     const st = mascot[slotKey];
-    part.draw(g, s, st.part === part.id && st.color ? st.color : part.color, Object.assign({ gap: .1, w: .38, t: 0, brow: .5, blink: 0, swing: 0, bounce: 0 }, part.thumbF));
+    const col = st.part === part.id && st.color ? st.color : part.color;
+    const f = Object.assign({ gap: .1, w: .38, t: 0, brow: .5, blink: 0, swing: 0, bounce: 0, sx: 1 }, part.thumbF);
+    if (part.side) {
+      // Side ears draw one ear at a time; show a pair either side of an imaginary face.
+      for (const k of [-1, 1]) { g.save(); g.translate(k * s * .45, 0); g.scale(k, 1); part.draw(g, s, col, f); g.restore(); }
+    } else {
+      part.draw(g, s, col, f);
+    }
     return c;
   }
 
