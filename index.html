@@ -2,32 +2,37 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Mascot Cam Test</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Mascot Cam</title>
 <style>
   :root {
     --bg: #0d1117;
+    --panel: rgba(13, 17, 23, .94);
+    --tile: #262d38;
+    --tile-on: #3a4352;
     --fg: #f2f4f7;
     --muted: #9aa4b2;
     --accent: #ffb020;
     --danger: #ff6b6b;
+    --ok: #7ee2a8;
     color-scheme: dark;
   }
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { height: 100%; margin: 0; }
   body {
     background: var(--bg);
     color: var(--fg);
     font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     overflow: hidden;
+    -webkit-user-select: none; user-select: none;
   }
-  /* The raw camera feed stays hidden; we draw it (plus the filter) onto the canvas. */
   video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-  canvas {
+  canvas#out {
     position: fixed; inset: 0;
     width: 100%; height: 100%;
     object-fit: cover;
     background: #000;
+    touch-action: none;
   }
   .start {
     position: fixed; inset: 0;
@@ -46,7 +51,9 @@
     cursor: pointer;
   }
   button:focus-visible { outline: 3px solid var(--fg); outline-offset: 3px; }
+  button.ghost { background: rgba(255,255,255,.16); color: var(--fg); }
   .error { color: var(--danger); }
+
   .bar {
     position: fixed; left: 0; right: 0; bottom: 0;
     display: flex; justify-content: center; flex-wrap: wrap; gap: 10px;
@@ -54,14 +61,73 @@
     background: linear-gradient(transparent, rgba(0,0,0,.6));
   }
   .bar button { padding: 12px 18px; }
-  .bar button.ghost { background: rgba(255,255,255,.18); color: var(--fg); backdrop-filter: blur(6px); }
+  .bar button.ghost { backdrop-filter: blur(6px); }
+
   .tag {
     position: fixed;
     top: calc(12px + env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left));
     font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
     background: rgba(0,0,0,.55); padding: 6px 10px; border-radius: 6px;
   }
-  .tag.ok { color: #7ee2a8; }
+  .tag.ok { color: var(--ok); }
+  .done {
+    position: fixed;
+    top: calc(8px + env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right));
+    padding: 10px 18px;
+  }
+
+  /* ----- Mascot builder sheet ----- */
+  .sheet {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    background: var(--panel);
+    border-radius: 18px 18px 0 0;
+    padding: 10px max(12px, env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    display: flex; flex-direction: column; gap: 10px;
+    transition: box-shadow .15s;
+  }
+  .sheet.drop-remove { box-shadow: inset 0 0 0 3px var(--danger); }
+  .sheet.drop-remove::after {
+    content: "Let go to remove";
+    position: absolute; top: -34px; left: 50%; transform: translateX(-50%);
+    background: var(--danger); color: #210000; font-weight: 700; font-size: 14px;
+    padding: 4px 12px; border-radius: 999px;
+  }
+  .row { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; }
+  .row::-webkit-scrollbar { display: none; }
+  .tabs button {
+    flex: none; padding: 8px 14px; font-size: 14px;
+    background: transparent; color: var(--muted);
+  }
+  .tabs button[aria-selected="true"] { background: var(--tile-on); color: var(--fg); }
+  .tray { padding-block: 2px; }
+  .tile {
+    flex: none; width: 68px;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    background: var(--tile); border-radius: 14px; padding: 6px 4px;
+    color: var(--fg); font-size: 11px; font-weight: 600; text-align: center;
+    border: 2px solid transparent; cursor: grab;
+    touch-action: pan-x;
+  }
+  .tile.on { border-color: var(--accent); }
+  .tile canvas { width: 48px; height: 48px; pointer-events: none; }
+  .tile .word { height: 48px; display: grid; place-items: center; font-size: 24px; }
+  .selbar { display: flex; flex-direction: column; gap: 8px; }
+  .selbar .top { display: flex; align-items: center; gap: 8px; }
+  .selbar .name { font-size: 14px; font-weight: 700; margin-right: auto; min-width: 0; }
+  .swatches { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding: 2px; }
+  .swatches::-webkit-scrollbar { display: none; }
+  .sw { flex: none; }
+  .sw { width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 2px solid rgba(255,255,255,.35); }
+  .sw.on { border-color: var(--fg); box-shadow: 0 0 0 2px var(--accent); }
+  .mini { padding: 6px 12px; font-size: 14px; }
+  .hint { font-size: 12px; color: var(--muted); max-width: none; }
+
+  .ghostpart {
+    position: fixed; width: 90px; height: 90px; pointer-events: none;
+    transform: translate(-50%, -50%) scale(1.1); z-index: 50;
+    filter: drop-shadow(0 6px 12px rgba(0,0,0,.5));
+  }
+
   .help {
     position: fixed; inset: 0;
     overflow-y: auto;
@@ -71,7 +137,6 @@
   }
   .help h2 { margin: 0; font-size: 1.4rem; text-wrap: balance; }
   .help ol { margin: 0; padding-left: 1.4em; display: flex; flex-direction: column; gap: 12px; }
-  .help li { padding-left: 4px; }
   .help b { color: var(--accent); }
   .help .note { font-size: 14px; color: var(--muted); max-width: none; }
   .help button { align-self: stretch; }
@@ -83,8 +148,8 @@
   <canvas id="out" hidden></canvas>
 
   <div class="start" id="start">
-    <h1>Mascot Cam Test</h1>
-    <p>Tap the button, then tap “Allow” when your phone asks to use the camera.</p>
+    <h1>Mascot Cam</h1>
+    <p>Build your own mascot face. Tap the button, then tap “Allow” when your phone asks to use the camera.</p>
     <button id="go">Turn on camera</button>
     <p class="error" id="err" hidden></p>
   </div>
@@ -101,60 +166,252 @@
   <div class="tag" id="tag" hidden>Loading face tracker…</div>
 
   <div class="bar" id="bar" hidden>
-    <button id="filterBtn">Filter: Bear</button>
+    <button id="editBtn">Build mascot</button>
     <button class="ghost" id="dotsBtn">Dots: off</button>
     <button class="ghost" id="flip">Flip</button>
     <button class="ghost" id="stop">Stop</button>
   </div>
 
+  <button class="done" id="doneBtn" hidden>Done</button>
+
+  <div class="sheet" id="sheet" hidden>
+    <div class="row tabs" id="tabs" role="tablist"></div>
+    <div class="row tray" id="tray"></div>
+    <div class="selbar" id="selbar">
+      <div class="top">
+        <span class="name" id="selName">Tap a part on your face to change it</span>
+        <button class="ghost mini" id="smaller" hidden aria-label="Smaller">−</button>
+        <button class="ghost mini" id="bigger" hidden aria-label="Bigger">+</button>
+        <button class="ghost mini" id="removeBtn" hidden>Remove</button>
+      </div>
+      <div class="swatches" id="swatches" hidden></div>
+    </div>
+    <p class="hint">Tap or drag a part onto your face. Tap a part on your face to move it, pinch to resize, drag it down here to remove.</p>
+  </div>
+
 <script type="module">
-  // Face tracking library (Google MediaPipe). Pinned version so it never changes under us.
   import { FaceLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
 
-  const video = document.getElementById('cam');
-  const canvas = document.getElementById('out');
-  const ctx = canvas.getContext('2d');
-  const start = document.getElementById('start');
-  const bar = document.getElementById('bar');
-  const tag = document.getElementById('tag');
-  const err = document.getElementById('err');
+  const $ = id => document.getElementById(id);
+  const video = $('cam'), canvas = $('out'), ctx = canvas.getContext('2d');
+  const start = $('start'), bar = $('bar'), tag = $('tag'), err = $('err'), sheet = $('sheet');
 
-  let stream = null;
-  let facing = 'user';          // 'user' = front camera, 'environment' = back camera
-  let landmarker = null;        // the face tracker, loaded once
-  let running = false;
-  let lastVideoTime = -1;
-  let showDots = false;
-  const FILTERS = ['Bear', 'Tiger', 'None'];
-  let filterIndex = 0;
+  let stream = null, facing = 'user', running = false, lastVideoTime = -1;
+  let landmarker = null, showDots = false, editing = false;
+  let pts = null;      // smoothed face points (canvas pixels)
+  let faceM = null;    // latest face measurements
 
-  // ---------- Face tracker ----------
+  // =====================================================================
+  //  PART LIBRARY — every prebuilt asset. Each draws itself at its slot's
+  //  anchor point, in "face units" (s = face width in pixels).
+  // =====================================================================
+  const shade = (hex, amt) => {           // amt < 0 darker, > 0 lighter
+    const n = parseInt(hex.slice(1), 16);
+    let r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+    const t = amt < 0 ? 0 : 255, a = Math.abs(amt);
+    r = Math.round(r + (t - r) * a); g = Math.round(g + (t - g) * a); b = Math.round(b + (t - b) * a);
+    return `rgb(${r},${g},${b})`;
+  };
+  const circle = (g, x, y, r, fill) => { g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fillStyle = fill; g.fill(); };
+  const star = (g, x, y, r, fill) => {
+    g.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.45 : r;
+      g.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+    }
+    g.closePath(); g.fillStyle = fill; g.fill();
+  };
+  const both = fn => { fn(-1); fn(1); };
+
+  const PARTS = {
+    head: [
+      { id: 'bearEars', name: 'Bear ears', color: '#7a4a24', cy: -0.28, r: 0.62, draw(g, s, c) {
+        both(k => { circle(g, k * s * .42, -s * .28, s * .2, c); circle(g, k * s * .42, -s * .28, s * .11, '#e9a8a0'); });
+      }},
+      { id: 'tigerEars', name: 'Tiger ears', color: '#f08a1c', cy: -0.25, r: 0.62, draw(g, s, c) {
+        both(k => {
+          g.beginPath(); g.moveTo(k * s * .25, -s * .12); g.lineTo(k * s * .48, -s * .5); g.lineTo(k * s * .58, -s * .08); g.closePath();
+          g.fillStyle = c; g.fill(); g.lineWidth = s * .03; g.strokeStyle = '#1b1b1b'; g.stroke();
+        });
+        g.strokeStyle = '#1b1b1b'; g.lineCap = 'round'; g.lineWidth = s * .045;
+        for (const dx of [-.12, 0, .12]) { g.beginPath(); g.moveTo(dx * s, s * .02); g.lineTo(dx * s * .7, s * .2); g.stroke(); }
+      }},
+      { id: 'horns', name: 'Horns', color: '#c8102e', cy: -0.3, r: 0.5, draw(g, s, c) {
+        both(k => {
+          g.beginPath(); g.moveTo(k * s * .12, -s * .06);
+          g.quadraticCurveTo(k * s * .16, -s * .36, k * s * .42, -s * .54);
+          g.quadraticCurveTo(k * s * .40, -s * .22, k * s * .32, -s * .04);
+          g.closePath(); g.fillStyle = c; g.fill();
+          g.lineWidth = s * .02; g.strokeStyle = shade(c, -.4); g.stroke();
+        });
+      }},
+      { id: 'cap', name: 'Ball cap', color: '#0b3d91', cy: -0.12, r: 0.58, draw(g, s, c) {
+        g.translate(0, s * .1);   // brim sits on the forehead
+        g.beginPath(); g.ellipse(0, -s * .02, s * .5, s * .46, 0, Math.PI, Math.PI * 2); g.closePath();
+        g.fillStyle = c; g.fill();
+        g.strokeStyle = shade(c, -.35); g.lineWidth = s * .015;
+        for (const dx of [-.22, .22]) { g.beginPath(); g.moveTo(0, -s * .48); g.quadraticCurveTo(dx * s, -s * .3, dx * s * 1.4, -s * .03); g.stroke(); }
+        star(g, 0, -s * .2, s * .1, '#ffffff');
+        g.beginPath(); g.ellipse(0, -s * .02, s * .56, s * .1, 0, 0, Math.PI); g.fillStyle = shade(c, -.3); g.fill();
+        circle(g, 0, -s * .48, s * .035, shade(c, -.35));
+      }},
+      { id: 'topHat', name: 'Top hat', color: '#1b1b1b', cy: -0.4, r: 0.62, draw(g, s, c) {
+        g.fillStyle = c; g.fillRect(-s * .3, -s * .8, s * .6, s * .74);
+        g.fillStyle = '#c8102e'; g.fillRect(-s * .3, -s * .2, s * .6, s * .08);
+        g.beginPath(); g.ellipse(0, -s * .06, s * .52, s * .08, 0, 0, Math.PI * 2); g.fillStyle = c; g.fill();
+        g.strokeStyle = shade(c, .25); g.lineWidth = s * .012; g.strokeRect(-s * .3, -s * .8, s * .6, s * .74);
+      }},
+      { id: 'crown', name: 'Crown', color: '#ffb81c', cy: -0.25, r: 0.48, draw(g, s, c) {
+        g.beginPath(); g.moveTo(-s * .36, -s * .04);
+        const peaks = [-.36, -.18, 0, .18, .36];
+        peaks.forEach((x, i) => { g.lineTo(x * s, -s * .46); if (i < 4) g.lineTo((x + .09) * s, -s * .24); });
+        g.lineTo(s * .36, -s * .04); g.closePath();
+        g.fillStyle = c; g.fill(); g.strokeStyle = shade(c, -.35); g.lineWidth = s * .02; g.stroke();
+        peaks.forEach(x => circle(g, x * s, -s * .46, s * .035, '#ffffff'));
+        circle(g, 0, -s * .14, s * .05, '#c8102e');
+      }}
+    ],
+    eyes: [
+      { id: 'shades', name: 'Sunglasses', color: '#1b1b1b', cy: 0.02, r: 0.42, draw(g, s, c) {
+        both(k => {
+          g.beginPath(); g.roundRect(k * s * .2 - s * .15, -s * .07, s * .3, s * .18, s * .06); g.fillStyle = c; g.fill();
+          g.fillStyle = 'rgba(255,255,255,.18)'; g.fillRect(k * s * .2 - s * .1, -s * .05, s * .07, s * .04);
+        });
+        g.fillStyle = c; g.fillRect(-s * .06, -s * .04, s * .12, s * .035);
+      }},
+      { id: 'glasses', name: 'Round glasses', color: '#ffb81c', cy: 0.02, r: 0.42, draw(g, s, c) {
+        g.strokeStyle = c; g.lineWidth = s * .03;
+        both(k => { g.beginPath(); g.arc(k * s * .2, s * .02, s * .13, 0, Math.PI * 2); g.stroke(); });
+        g.beginPath(); g.moveTo(-s * .07, 0); g.quadraticCurveTo(0, -s * .04, s * .07, 0); g.stroke();
+      }},
+      { id: 'eyeBlack', name: 'Eye black', color: '#1b1b1b', cy: 0.15, r: 0.36, draw(g, s, c) {
+        both(k => { g.beginPath(); g.roundRect(k * s * .2 - s * .1, s * .13, s * .2, s * .05, s * .02); g.fillStyle = c; g.fill(); });
+      }},
+      { id: 'mask', name: 'Hero mask', color: '#c8102e', cy: 0.02, r: 0.44, draw(g, s, c) {
+        g.beginPath(); g.ellipse(0, s * .02, s * .42, s * .14, 0, 0, Math.PI * 2);
+        both(k => { g.moveTo(k * s * .2 + s * .08, s * .02); g.ellipse(k * s * .2, s * .02, s * .08, s * .055, 0, 0, Math.PI * 2); });
+        g.fillStyle = c; g.fill('evenodd');
+      }}
+    ],
+    nose: [
+      { id: 'bearNose', name: 'Bear nose', color: '#2b1a10', cy: 0, r: 0.15, draw(g, s, c) {
+        g.beginPath(); g.ellipse(0, 0, s * .12, s * .085, 0, 0, Math.PI * 2); g.fillStyle = c; g.fill();
+        circle(g, -s * .035, -s * .03, s * .025, 'rgba(255,255,255,.6)');
+      }},
+      { id: 'tigerNose', name: 'Cat nose', color: '#ff7aa2', cy: 0.02, r: 0.13, draw(g, s, c) {
+        g.beginPath(); g.moveTo(-s * .08, -s * .02); g.lineTo(s * .08, -s * .02); g.lineTo(0, s * .07); g.closePath();
+        g.fillStyle = c; g.fill();
+      }},
+      { id: 'clownNose', name: 'Clown nose', color: '#e01b24', cy: 0, r: 0.13, draw(g, s, c) {
+        circle(g, 0, 0, s * .1, c); circle(g, -s * .03, -s * .035, s * .025, 'rgba(255,255,255,.7)');
+      }}
+    ],
+    cheeks: [
+      { id: 'blush', name: 'Blush', color: '#ff6f91', cy: 0, r: 0.13, draw(g, s, c) {
+        g.globalAlpha = .5; circle(g, 0, 0, s * .09, c); g.globalAlpha = 1;
+      }},
+      { id: 'stripes', name: 'Face paint', color: '#0b3d91', cy: 0, r: 0.13, draw(g, s, c) {
+        g.lineCap = 'round'; g.lineWidth = s * .04;
+        [[c, -.035], ['#ffffff', .035]].forEach(([col, dy]) => {
+          g.strokeStyle = col; g.beginPath(); g.moveTo(-s * .07, dy * s + s * .03); g.lineTo(s * .07, dy * s - s * .03); g.stroke();
+        });
+      }},
+      { id: 'cheekStar', name: 'Star', color: '#ffb81c', cy: 0, r: 0.12, draw(g, s, c) { star(g, 0, 0, s * .08, c); } }
+    ],
+    mouth: [
+      { id: 'whiskers', name: 'Whiskers', color: '#ffffff', cy: -0.05, r: 0.46, draw(g, s, c) {
+        g.strokeStyle = c; g.lineWidth = s * .012; g.lineCap = 'round';
+        both(k => [-.03, .02, .07].forEach(dy => { g.beginPath(); g.moveTo(k * s * .14, -s * .07); g.lineTo(k * s * .44, s * (dy - .07)); g.stroke(); }));
+      }},
+      { id: 'mustache', name: 'Mustache', color: '#3b2314', cy: -0.06, r: 0.22, draw(g, s, c) {
+        g.beginPath(); g.moveTo(0, -s * .07);
+        g.bezierCurveTo(s * .08, -s * .12, s * .16, -s * .06, s * .22, -s * .1);
+        g.bezierCurveTo(s * .2, -s * .01, s * .08, -s * .02, 0, -s * .04);
+        g.bezierCurveTo(-s * .08, -s * .02, -s * .2, -s * .01, -s * .22, -s * .1);
+        g.bezierCurveTo(-s * .16, -s * .06, -s * .08, -s * .12, 0, -s * .07);
+        g.fillStyle = c; g.fill();
+      }},
+      { id: 'fangs', name: 'Fangs', color: '#ffffff', cy: 0.04, r: 0.14, draw(g, s, c) {
+        both(k => {
+          g.beginPath(); g.moveTo(k * s * .04, 0); g.lineTo(k * s * .1, 0); g.lineTo(k * s * .07, s * .09); g.closePath();
+          g.fillStyle = c; g.fill(); g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = s * .008; g.stroke();
+        });
+      }},
+      { id: 'beard', name: 'Beard', color: '#5a3a1e', cy: 0.18, r: 0.46, draw(g, s, c) {
+        g.beginPath();
+        g.moveTo(-s * .44, -s * .12);
+        g.quadraticCurveTo(-s * .4, s * .42, 0, s * .5);
+        g.quadraticCurveTo(s * .4, s * .42, s * .44, -s * .12);
+        g.quadraticCurveTo(s * .3, s * .1, 0, s * .08);
+        g.quadraticCurveTo(-s * .3, s * .1, -s * .44, -s * .12);
+        g.moveTo(s * .13, s * .04); g.ellipse(0, s * .04, s * .13, s * .07, 0, 0, Math.PI * 2);
+        g.fillStyle = c; g.fill('evenodd');
+      }}
+    ]
+  };
+  const findPart = (slot, id) => PARTS[slot].find(p => p.id === id);
+
+  // Where each slot sits on the face. Cheeks appear twice (mirrored).
+  const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  const SLOTS = [
+    { key: 'mouth',  label: 'Mouth',  anchors: [p => p[13]] },
+    { key: 'cheeks', label: 'Cheeks', anchors: [p => p[205], p => p[425]] },
+    { key: 'nose',   label: 'Nose',   anchors: [p => p[1]] },
+    { key: 'eyes',   label: 'Eyes',   anchors: [p => mid(p[33], p[263])] },
+    { key: 'head',   label: 'Head',   anchors: [p => p[10]] }
+  ];
+  const TAB_ORDER = ['presets', 'head', 'eyes', 'nose', 'cheeks', 'mouth'];
+
+  const COLORS = ['#7a4a24', '#f08a1c', '#c8102e', '#0b3d91', '#00843d', '#ffb81c', '#6a2c91', '#1b1b1b', '#ffffff'];
+
+  const blankSlot = () => ({ part: null, dx: 0, dy: 0, scale: 1, color: null });
+  const slotWith = (slot, id, color) => ({ part: id, dx: 0, dy: 0, scale: 1, color: color || findPart(slot, id).color });
+  const PRESETS = [
+    { name: 'Bear',  icon: '🐻', build: () => ({ head: slotWith('head', 'bearEars'), nose: slotWith('nose', 'bearNose'), cheeks: slotWith('cheeks', 'blush') }) },
+    { name: 'Tiger', icon: '🐯', build: () => ({ head: slotWith('head', 'tigerEars'), nose: slotWith('nose', 'tigerNose'), mouth: slotWith('mouth', 'whiskers') }) },
+    { name: 'Fan',   icon: '📣', build: () => ({ head: slotWith('head', 'cap'), eyes: slotWith('eyes', 'eyeBlack'), cheeks: slotWith('cheeks', 'stripes') }) },
+    { name: 'Blank', icon: '⬜', build: () => ({}) }
+  ];
+  function presetState(i) {
+    const built = PRESETS[i].build();
+    const st = {};
+    for (const s of SLOTS) st[s.key] = built[s.key] || blankSlot();
+    return st;
+  }
+
+  // The user's mascot, remembered on this phone.
+  let mascot = presetState(0);
+  try {
+    const saved = JSON.parse(localStorage.getItem('mascot-v1') || 'null');
+    if (saved) for (const s of SLOTS) if (saved[s.key]) mascot[s.key] = saved[s.key];
+  } catch (_) {}
+  const save = () => { try { localStorage.setItem('mascot-v1', JSON.stringify(mascot)); } catch (_) {} };
+
+  // =====================================================================
+  //  FACE TRACKER
+  // =====================================================================
   let trackerPromise = null;
   function loadTracker() {
-    // Only ever load it once, even if asked twice at the same time.
     if (!trackerPromise) trackerPromise = createTracker().catch(e => { trackerPromise = null; throw e; });
     return trackerPromise;
   }
   async function createTracker() {
     const files = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
-    const opts = (delegate) => ({
+    const opts = delegate => ({
       baseOptions: {
         modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
         delegate
       },
-      runningMode: 'VIDEO',
-      numFaces: 1
+      runningMode: 'VIDEO', numFaces: 1
     });
-    try {
-      landmarker = await FaceLandmarker.createFromOptions(files, opts('GPU'));
-    } catch (e) {
-      // Some phones can't use the graphics chip for this; fall back to the regular processor.
-      landmarker = await FaceLandmarker.createFromOptions(files, opts('CPU'));
-    }
+    try { landmarker = await FaceLandmarker.createFromOptions(files, opts('GPU')); }
+    catch (e) { landmarker = await FaceLandmarker.createFromOptions(files, opts('CPU')); }
     return landmarker;
   }
 
-  // ---------- Camera ----------
+  // =====================================================================
+  //  CAMERA
+  // =====================================================================
   function showError(msg) { err.textContent = msg; err.hidden = false; }
 
   async function openCamera() {
@@ -164,8 +421,7 @@
     stopCamera();
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: false
+        video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false
       });
     } catch (e) {
       start.hidden = false;
@@ -176,17 +432,13 @@
     }
     video.srcObject = stream;
     await video.play().catch(() => {});
-    start.hidden = true;
-    canvas.hidden = false;
-    bar.hidden = false;
-    tag.hidden = false;
+    start.hidden = true; canvas.hidden = false; tag.hidden = false;
+    setEditing(editing);
     running = true;
     requestAnimationFrame(loop);
-
     if (!landmarker) {
       setTag('Loading face tracker…', false);
-      try { await loadTracker(); }
-      catch (e) { setTag('Face tracker failed to load: ' + e.message, false); }
+      try { await loadTracker(); } catch (e) { setTag('Face tracker failed to load: ' + e.message, false); }
     }
   }
 
@@ -201,7 +453,21 @@
     tag.classList.toggle('ok', !!ok);
   }
 
-  // ---------- Main loop: draw camera, find face, draw filter ----------
+  // =====================================================================
+  //  DRAW LOOP
+  // =====================================================================
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+  function measure(p) {
+    const a = p[33], b = p[263];
+    const [l, r] = a.x < b.x ? [a, b] : [b, a];
+    return {
+      size: dist(p[234], p[454]),
+      angle: Math.atan2(r.y - l.y, r.x - l.x),
+      mouthOpen: dist(p[13], p[14]) / dist(p[10], p[152])
+    };
+  }
+
   function loop() {
     if (!running) return;
     const w = video.videoWidth, h = video.videoHeight;
@@ -209,147 +475,344 @@
       if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
       const mirror = facing === 'user';
 
-      // 1. Draw the camera picture (mirrored for selfie view).
       ctx.save();
       if (mirror) { ctx.translate(w, 0); ctx.scale(-1, 1); }
       ctx.drawImage(video, 0, 0, w, h);
       ctx.restore();
 
-      // 2. Find the face.
       if (landmarker && video.currentTime !== lastVideoTime) {
         lastVideoTime = video.currentTime;
-        const result = landmarker.detectForVideo(video, performance.now());
-        const face = result.faceLandmarks && result.faceLandmarks[0];
+        const res = landmarker.detectForVideo(video, performance.now());
+        const face = res.faceLandmarks && res.faceLandmarks[0];
         if (face) {
-          // Turn the tracker's 0–1 numbers into pixel spots on the canvas.
-          const pts = face.map(p => ({ x: (mirror ? 1 - p.x : p.x) * w, y: p.y * h }));
-          window.__lastPts = pts;
-          setTag('Face found ✓', true);
+          const fresh = face.map(q => ({ x: (mirror ? 1 - q.x : q.x) * w, y: q.y * h }));
+          // Light smoothing so parts don't jitter.
+          pts = pts && pts.length === fresh.length
+            ? fresh.map((q, i) => ({ x: pts[i].x + (q.x - pts[i].x) * .65, y: pts[i].y + (q.y - pts[i].y) * .65 }))
+            : fresh;
+          faceM = measure(pts);
+          setTag(editing ? 'Face found ✓ — tap a part to edit' : 'Face found ✓', true);
         } else {
-          window.__lastPts = null;
-          setTag('Looking for a face…', false);
+          pts = null; faceM = null;
+          setTag(editing ? 'Look at the camera to edit' : 'Looking for a face…', false);
         }
       }
 
-      // 3. Draw the filter on top.
-      const pts = window.__lastPts;
-      if (pts) {
-        if (showDots) drawDots(pts);
-        const name = FILTERS[filterIndex];
-        if (name === 'Bear') drawBear(pts);
-        if (name === 'Tiger') drawTiger(pts);
+      if (pts && faceM) {
+        if (showDots) drawDots();
+        drawMascot();
+        roarIfMouthOpen();
+        if (editing && selected) drawSelection();
       }
     }
     requestAnimationFrame(loop);
   }
 
-  // ---------- Face measurements ----------
-  // Key spots on the face (MediaPipe's numbering).
-  const P = { forehead: 10, chin: 152, nose: 1, leftFace: 234, rightFace: 454, eyeA: 33, eyeB: 263, lipTop: 13, lipBottom: 14, cheekA: 205, cheekB: 425 };
-  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-
-  function measure(pts) {
-    const eyeA = pts[P.eyeA], eyeB = pts[P.eyeB];
-    // Keep the angle pointing left-to-right on screen, whichever eye is on the left.
-    const [l, r] = eyeA.x < eyeB.x ? [eyeA, eyeB] : [eyeB, eyeA];
-    return {
-      size: dist(pts[P.leftFace], pts[P.rightFace]),   // face width in pixels
-      angle: Math.atan2(r.y - l.y, r.x - l.x),          // head tilt
-      top: pts[P.forehead],
-      nose: pts[P.nose],
-      mouthOpen: dist(pts[P.lipTop], pts[P.lipBottom]) / dist(pts[P.forehead], pts[P.chin])
-    };
+  // Each part instance: anchor → turn with head → (mirror for 2nd cheek) → user offset → user size.
+  function eachInstance(fn) {
+    for (const slot of SLOTS) {
+      const st = mascot[slot.key];
+      if (!st || !st.part) continue;
+      const part = findPart(slot.key, st.part);
+      if (!part) continue;
+      slot.anchors.forEach((getAnchor, inst) => fn(slot, st, part, getAnchor(pts), inst, inst === 1 ? -1 : 1));
+    }
   }
 
-  // Draw something in "face space": centred on a point, turned with the head, scaled to face size.
-  function inFaceSpace(at, m, draw) {
+  function applyTransform(g, anchor, sx, st) {
+    const s = faceM.size;
+    g.translate(anchor.x, anchor.y);
+    g.rotate(faceM.angle);
+    g.scale(sx, 1);
+    g.translate(st.dx * s, st.dy * s);
+    g.scale(st.scale, st.scale);
+  }
+
+  function drawMascot() {
+    eachInstance((slot, st, part, anchor, inst, sx) => {
+      ctx.save();
+      applyTransform(ctx, anchor, sx, st);
+      part.draw(ctx, faceM.size, st.color || part.color);
+      ctx.restore();
+    });
+  }
+
+  // Centre + radius of a part on screen, for tapping it.
+  function hitCircle(part, st, anchor, sx) {
+    const s = faceM.size;
+    const lx = sx * (st.dx * s), ly = st.dy * s + part.cy * s * st.scale;
+    const c = Math.cos(faceM.angle), n = Math.sin(faceM.angle);
+    return { x: anchor.x + lx * c - ly * n, y: anchor.y + lx * n + ly * c, r: part.r * s * st.scale };
+  }
+
+  function drawSelection() {
+    eachInstance((slot, st, part, anchor, inst, sx) => {
+      if (slot.key !== selected.slot) return;
+      const hc = hitCircle(part, st, anchor, sx);
+      ctx.save();
+      ctx.setLineDash([canvas.width / 80, canvas.width / 120]);
+      ctx.lineWidth = Math.max(2, canvas.width / 300);
+      ctx.strokeStyle = '#ffb020';
+      ctx.beginPath(); ctx.arc(hc.x, hc.y, hc.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    });
+  }
+
+  function roarIfMouthOpen() {
+    if (faceM.mouthOpen < 0.12) return;
+    const s = faceM.size;
     ctx.save();
-    ctx.translate(at.x, at.y);
-    ctx.rotate(m.angle);
-    draw(m.size);
+    ctx.translate(pts[1].x, pts[10].y); ctx.rotate(faceM.angle);
+    ctx.font = `900 ${Math.round(s * .32)}px system-ui, -apple-system, sans-serif`;
+    ctx.textAlign = 'center'; ctx.lineWidth = s * .05; ctx.strokeStyle = '#1b1b1b';
+    ctx.strokeText('ROAR!', 0, -s * .7); ctx.fillStyle = '#ffb020'; ctx.fillText('ROAR!', 0, -s * .7);
     ctx.restore();
   }
 
-  function circle(x, y, r, fill) {
-    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = fill; ctx.fill();
-  }
-
-  // ---------- Test filters ----------
-  function drawBear(pts) {
-    const m = measure(pts);
-    // Ears on top of the head
-    inFaceSpace(m.top, m, s => {
-      for (const side of [-1, 1]) {
-        circle(side * s * 0.42, -s * 0.28, s * 0.2, '#7a4a24');
-        circle(side * s * 0.42, -s * 0.28, s * 0.11, '#e9a8a0');
-      }
-    });
-    // Cheeks
-    for (const i of [P.cheekA, P.cheekB]) {
-      inFaceSpace(pts[i], m, s => { ctx.globalAlpha = 0.45; circle(0, 0, s * 0.09, '#ff6f91'); ctx.globalAlpha = 1; });
-    }
-    // Nose
-    inFaceSpace(m.nose, m, s => {
-      ctx.beginPath();
-      ctx.ellipse(0, 0, s * 0.12, s * 0.085, 0, 0, Math.PI * 2);
-      ctx.fillStyle = '#2b1a10'; ctx.fill();
-      circle(-s * 0.035, -s * 0.03, s * 0.025, 'rgba(255,255,255,.6)');
-    });
-    roarIfMouthOpen(m);
-  }
-
-  function drawTiger(pts) {
-    const m = measure(pts);
-    inFaceSpace(m.top, m, s => {
-      // Pointy ears
-      for (const side of [-1, 1]) {
-        ctx.beginPath();
-        ctx.moveTo(side * s * 0.25, -s * 0.12);
-        ctx.lineTo(side * s * 0.48, -s * 0.5);
-        ctx.lineTo(side * s * 0.58, -s * 0.08);
-        ctx.closePath();
-        ctx.fillStyle = '#f08a1c'; ctx.fill();
-        ctx.lineWidth = s * 0.03; ctx.strokeStyle = '#1b1b1b'; ctx.stroke();
-      }
-      // Forehead stripes
-      ctx.strokeStyle = '#1b1b1b'; ctx.lineCap = 'round'; ctx.lineWidth = s * 0.045;
-      for (const dx of [-0.12, 0, 0.12]) {
-        ctx.beginPath(); ctx.moveTo(dx * s, s * 0.02); ctx.lineTo(dx * s * 0.7, s * 0.2); ctx.stroke();
-      }
-    });
-    // Whiskers + nose
-    inFaceSpace(m.nose, m, s => {
-      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = s * 0.012; ctx.lineCap = 'round';
-      for (const side of [-1, 1]) for (const dy of [-0.03, 0.02, 0.07]) {
-        ctx.beginPath(); ctx.moveTo(side * s * 0.12, s * 0.06); ctx.lineTo(side * s * 0.42, s * (0.06 + dy)); ctx.stroke();
-      }
-      ctx.beginPath();
-      ctx.moveTo(-s * 0.08, -s * 0.02); ctx.lineTo(s * 0.08, -s * 0.02); ctx.lineTo(0, s * 0.07); ctx.closePath();
-      ctx.fillStyle = '#ff7aa2'; ctx.fill();
-    });
-    roarIfMouthOpen(m);
-  }
-
-  // Proves expressions work: open your mouth and the mascot roars.
-  function roarIfMouthOpen(m) {
-    if (m.mouthOpen < 0.12) return;
-    inFaceSpace({ x: m.nose.x, y: m.top.y }, m, s => {
-      ctx.font = `900 ${Math.round(s * 0.32)}px system-ui, -apple-system, sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.lineWidth = s * 0.05; ctx.strokeStyle = '#1b1b1b';
-      ctx.strokeText('ROAR!', 0, -s * 0.62);
-      ctx.fillStyle = '#ffb020';
-      ctx.fillText('ROAR!', 0, -s * 0.62);
-    });
-  }
-
-  function drawDots(pts) {
-    ctx.fillStyle = 'rgba(126, 226, 168, .85)';
+  function drawDots() {
+    ctx.fillStyle = 'rgba(126,226,168,.85)';
     const r = Math.max(1.5, canvas.width / 500);
-    for (const p of pts) { ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill(); }
+    for (const q of pts) { ctx.beginPath(); ctx.arc(q.x, q.y, r, 0, Math.PI * 2); ctx.fill(); }
   }
 
-  // ---------- Camera-blocked help ----------
+  // =====================================================================
+  //  EDITING ON THE FACE — tap to select, drag to move, pinch to resize
+  // =====================================================================
+  let selected = null;   // { slot, inst }
+  const pointers = new Map();
+  let drag = null, pinch = null;
+
+  // Screen tap → canvas pixel (the canvas is stretched with "cover").
+  function toCanvas(cx, cy) {
+    const rect = canvas.getBoundingClientRect();
+    const k = Math.max(rect.width / canvas.width, rect.height / canvas.height);
+    const ox = (rect.width - canvas.width * k) / 2, oy = (rect.height - canvas.height * k) / 2;
+    return { x: (cx - rect.left - ox) / k, y: (cy - rect.top - oy) / k, k };
+  }
+
+  function hitTest(cx, cy) {
+    if (!pts || !faceM) return null;
+    const p = toCanvas(cx, cy);
+    let best = null;
+    eachInstance((slot, st, part, anchor, inst, sx) => {
+      const hc = hitCircle(part, st, anchor, sx);
+      const slack = 24 / p.k;                     // a little forgiveness for fingers
+      if (dist(p, hc) <= hc.r + slack && (!best || hc.r < best.r)) best = { slot: slot.key, inst, r: hc.r };
+    });
+    return best;
+  }
+
+  const overSheet = y => !sheet.hidden && y > sheet.getBoundingClientRect().top;
+
+  canvas.addEventListener('pointerdown', e => {
+    if (!editing) return;
+    canvas.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 1) {
+      const hit = hitTest(e.clientX, e.clientY);
+      if (hit) {
+        selected = { slot: hit.slot, inst: hit.inst };
+        const st = mascot[hit.slot];
+        drag = { x: e.clientX, y: e.clientY, dx: st.dx, dy: st.dy, sx: hit.inst === 1 ? -1 : 1 };
+        showTab(hit.slot, false);
+      } else {
+        selected = null; drag = null;
+      }
+      updateSelbar();
+    } else if (pointers.size === 2 && selected) {
+      const [a, b] = [...pointers.values()];
+      pinch = { d: dist(a, b), scale: mascot[selected.slot].scale };
+      drag = null;
+    }
+  });
+
+  canvas.addEventListener('pointermove', e => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch && pointers.size >= 2 && selected) {
+      const [a, b] = [...pointers.values()];
+      mascot[selected.slot].scale = Math.min(3, Math.max(.35, pinch.scale * dist(a, b) / pinch.d));
+    } else if (drag && selected && faceM) {
+      const k = toCanvas(0, 0).k;
+      const cdx = (e.clientX - drag.x) / k, cdy = (e.clientY - drag.y) / k;
+      const c = Math.cos(faceM.angle), n = Math.sin(faceM.angle);
+      const fx = (cdx * c + cdy * n) / faceM.size, fy = (-cdx * n + cdy * c) / faceM.size;
+      const st = mascot[selected.slot];
+      st.dx = drag.dx + fx * drag.sx;
+      st.dy = drag.dy + fy;
+      sheet.classList.toggle('drop-remove', overSheet(e.clientY));
+    }
+  });
+
+  function endPointer(e) {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.delete(e.pointerId);
+    if (drag && selected && overSheet(e.clientY)) removeSelected();
+    sheet.classList.remove('drop-remove');
+    if (pointers.size < 2) pinch = null;
+    if (pointers.size === 0) { drag = null; save(); }
+  }
+  canvas.addEventListener('pointerup', endPointer);
+  canvas.addEventListener('pointercancel', endPointer);
+
+  // =====================================================================
+  //  BUILDER SHEET — tabs, part tray, color + size controls
+  // =====================================================================
+  let currentTab = 'head';
+
+  function renderTabs() {
+    $('tabs').innerHTML = '';
+    for (const key of TAB_ORDER) {
+      const b = document.createElement('button');
+      b.textContent = key === 'presets' ? 'Start from' : SLOTS.find(s => s.key === key).label;
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', String(key === currentTab));
+      b.onclick = () => showTab(key, true);
+      $('tabs').appendChild(b);
+    }
+  }
+
+  function showTab(key, selectIt) {
+    currentTab = key;
+    if (selectIt && key !== 'presets') selected = mascot[key].part ? { slot: key, inst: 0 } : null;
+    renderTabs(); renderTray(); updateSelbar();
+  }
+
+  function thumb(slotKey, part) {
+    const d = Math.min(3, window.devicePixelRatio || 1);
+    const c = document.createElement('canvas');
+    c.width = c.height = 60 * d;
+    const g = c.getContext('2d');
+    const s = (c.width * .44) / part.r;
+    g.translate(c.width / 2, c.height / 2 - part.cy * s);
+    const st = mascot[slotKey];
+    part.draw(g, s, st.part === part.id && st.color ? st.color : part.color);
+    return c;
+  }
+
+  function renderTray() {
+    const tray = $('tray');
+    tray.innerHTML = '';
+    if (currentTab === 'presets') {
+      PRESETS.forEach((pr, i) => {
+        const t = document.createElement('button');
+        t.className = 'tile';
+        t.innerHTML = `<span class="word">${pr.icon}</span>${pr.name}`;
+        t.onclick = () => { mascot = presetState(i); selected = null; save(); showTab('presets', false); };
+        tray.appendChild(t);
+      });
+      return;
+    }
+    const slotKey = currentTab;
+    const none = document.createElement('button');
+    none.className = 'tile' + (mascot[slotKey].part ? '' : ' on');
+    none.innerHTML = '<span class="word">∅</span>None';
+    none.onclick = () => { mascot[slotKey] = blankSlot(); selected = null; save(); renderTray(); updateSelbar(); };
+    tray.appendChild(none);
+
+    for (const part of PARTS[slotKey]) {
+      const t = document.createElement('div');
+      t.className = 'tile' + (mascot[slotKey].part === part.id ? ' on' : '');
+      t.tabIndex = 0;
+      t.setAttribute('role', 'button');
+      t.appendChild(thumb(slotKey, part));
+      t.appendChild(document.createTextNode(part.name));
+      makeDraggable(t, slotKey, part);
+      t.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); equip(slotKey, part.id); } };
+      tray.appendChild(t);
+    }
+  }
+
+  // Put a part on the face, replacing whatever was in that spot.
+  function equip(slotKey, id) {
+    const prev = mascot[slotKey];
+    const part = findPart(slotKey, id);
+    mascot[slotKey] = { part: id, dx: 0, dy: 0, scale: prev.part ? prev.scale : 1, color: part.color };
+    selected = { slot: slotKey, inst: 0 };
+    save(); renderTray(); updateSelbar();
+  }
+
+  // Tap a tile to add it; or drag it up onto the face.
+  function makeDraggable(tile, slotKey, part) {
+    let startP = null, ghost = null;
+    tile.addEventListener('pointerdown', e => {
+      startP = { x: e.clientX, y: e.clientY, id: e.pointerId };
+      try { tile.setPointerCapture(e.pointerId); } catch (_) {}   // keep following the finger even after it leaves the tile
+    });
+    tile.addEventListener('pointermove', e => {
+      if (!startP || e.pointerId !== startP.id) return;
+      const dx = e.clientX - startP.x, dy = e.clientY - startP.y;
+      if (!ghost && -dy > 10 && Math.abs(dy) > Math.abs(dx)) {
+        ghost = thumb(slotKey, part);
+        ghost.className = 'ghostpart';
+        document.body.appendChild(ghost);
+      }
+      if (ghost) { ghost.style.left = e.clientX + 'px'; ghost.style.top = e.clientY + 'px'; }
+    });
+    const finish = e => {
+      if (!startP || e.pointerId !== startP.id) return;
+      const moved = Math.hypot(e.clientX - startP.x, e.clientY - startP.y);
+      if (ghost) {
+        ghost.remove(); ghost = null;
+        if (e.type === 'pointerup' && !overSheet(e.clientY)) equip(slotKey, part.id);
+      } else if (e.type === 'pointerup' && moved < 8) {
+        equip(slotKey, part.id);
+      }
+      startP = null;
+    };
+    tile.addEventListener('pointerup', finish);
+    tile.addEventListener('pointercancel', finish);
+  }
+
+  function updateSelbar() {
+    const has = selected && mascot[selected.slot] && mascot[selected.slot].part;
+    const part = has ? findPart(selected.slot, mascot[selected.slot].part) : null;
+    $('selName').textContent = part ? part.name : (currentTab === 'presets' ? 'Pick a mascot to start from' : 'Tap a part on your face to change it');
+    for (const id of ['swatches', 'smaller', 'bigger', 'removeBtn']) $(id).hidden = !part;
+    if (!part) return;
+    const st = mascot[selected.slot];
+    const sw = $('swatches');
+    sw.innerHTML = '';
+    for (const col of COLORS) {
+      const b = document.createElement('button');
+      b.className = 'sw' + ((st.color || part.color) === col ? ' on' : '');
+      b.style.background = col;
+      b.setAttribute('aria-label', 'Color ' + col);
+      b.onclick = () => { st.color = col; save(); renderTray(); updateSelbar(); };
+      sw.appendChild(b);
+    }
+  }
+
+  function removeSelected() {
+    if (!selected) return;
+    mascot[selected.slot] = blankSlot();
+    selected = null;
+    save(); renderTray(); updateSelbar();
+  }
+
+  $('smaller').onclick = () => { if (selected) { const st = mascot[selected.slot]; st.scale = Math.max(.35, st.scale * .9); save(); } };
+  $('bigger').onclick  = () => { if (selected) { const st = mascot[selected.slot]; st.scale = Math.min(3, st.scale * 1.1); save(); } };
+  $('removeBtn').onclick = removeSelected;
+
+  // While editing, shrink the camera view to the space above the panel so your face isn't covered.
+  function fitCanvas() {
+    canvas.style.height = editing ? `calc(100% - ${sheet.offsetHeight - 18}px)` : '100%';
+  }
+  new ResizeObserver(fitCanvas).observe(sheet);
+
+  function setEditing(on) {
+    editing = on;
+    sheet.hidden = !on; $('doneBtn').hidden = !on; bar.hidden = on;
+    if (!on) selected = null;
+    if (on) showTab(currentTab, true);
+    fitCanvas();
+  }
+  $('editBtn').onclick = () => setEditing(true);
+  $('doneBtn').onclick = () => setEditing(false);
+
+  // =====================================================================
+  //  CAMERA-BLOCKED HELP
+  // =====================================================================
   function whichBrowser() {
     const ua = navigator.userAgent;
     const isIOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -361,60 +824,40 @@
     if (/Android/.test(ua)) return 'android-chrome';
     return 'desktop';
   }
-
   const STEPS = {
-    'ios-safari': {
-      steps: ['Tap <b>aA</b> (or the page icon) on the left side of the address bar.', 'Tap <b>Website Settings</b>.', 'Tap <b>Camera</b> and choose <b>Allow</b> (or <b>Ask</b>).', 'Tap <b>Done</b>, then tap <b>Try again</b> below.'],
-      note: 'Still blocked? Open the Settings app → Apps → Safari → Camera, and choose Ask or Allow. Then come back and reload this page.'
-    },
+    'ios-safari': { steps: ['Tap <b>aA</b> (or the page icon) on the left side of the address bar.', 'Tap <b>Website Settings</b>.', 'Tap <b>Camera</b> and choose <b>Allow</b> (or <b>Ask</b>).', 'Tap <b>Done</b>, then tap <b>Try again</b> below.'], note: 'Still blocked? Open the Settings app → Apps → Safari → Camera, and choose Ask or Allow. Then come back and reload this page.' },
     'ios-chrome': { steps: ['Open the iPhone <b>Settings</b> app.', 'Tap <b>Apps</b>, then <b>Chrome</b>.', 'Turn on <b>Camera</b>.', 'Come back here and tap <b>Try again</b>.'], note: 'If Chrome asks again, tap Allow.' },
     'ios-firefox': { steps: ['Open the iPhone <b>Settings</b> app.', 'Tap <b>Apps</b>, then <b>Firefox</b>.', 'Turn on <b>Camera</b>.', 'Come back here and tap <b>Try again</b>.'], note: '' },
     'ios-inapp': { steps: ['This page opened inside another app, which blocks the camera.', 'Tap the <b>⋯</b> or share button in the corner.', 'Choose <b>Open in Safari</b> (or Open in browser).', 'Tap <b>Turn on camera</b> again there.'], note: '' },
     'android-chrome': { steps: ['Tap the <b>icon left of the web address</b>.', 'Tap <b>Permissions</b> (or Site settings).', 'Turn on <b>Camera</b>.', 'Tap <b>Try again</b> below.'], note: '' },
     'desktop': { steps: ['Click the <b>icon left of the web address</b>.', 'Set <b>Camera</b> to <b>Allow</b>.', 'Click <b>Try again</b> below.'], note: '' }
   };
-
   async function showHelp(e) {
     const info = STEPS[whichBrowser()];
     let perm = 'unknown';
     try { perm = (await navigator.permissions.query({ name: 'camera' })).state; } catch (_) {}
-    document.getElementById('diag').textContent =
-      'Details: browser=' + whichBrowser() + ' · address=' + location.protocol + '//' + location.host +
+    $('diag').textContent = 'Details: browser=' + whichBrowser() + ' · address=' + location.protocol + '//' + location.host +
       ' · permission=' + perm + ' · error=' + e.name + ' (' + e.message + ')';
-    document.getElementById('helpSteps').innerHTML = info.steps.map(s => '<li>' + s + '</li>').join('');
-    const note = document.getElementById('helpNote');
-    note.textContent = info.note; note.hidden = !info.note;
-    start.hidden = true;
-    document.getElementById('help').hidden = false;
+    $('helpSteps').innerHTML = info.steps.map(s => '<li>' + s + '</li>').join('');
+    $('helpNote').textContent = info.note; $('helpNote').hidden = !info.note;
+    start.hidden = true; $('help').hidden = false;
   }
 
-  // ---------- Buttons ----------
-  document.getElementById('go').onclick = openCamera;
-  document.getElementById('retry').onclick = () => {
-    document.getElementById('help').hidden = true;
-    start.hidden = false;
+  // =====================================================================
+  //  BUTTONS
+  // =====================================================================
+  $('go').onclick = openCamera;
+  $('retry').onclick = () => {
+    $('help').hidden = true; start.hidden = false;
     if (whichBrowser().startsWith('ios')) location.reload(); else openCamera();
   };
-  document.getElementById('filterBtn').onclick = (ev) => {
-    filterIndex = (filterIndex + 1) % FILTERS.length;
-    ev.target.textContent = 'Filter: ' + FILTERS[filterIndex];
-  };
-  document.getElementById('dotsBtn').onclick = (ev) => {
-    showDots = !showDots;
-    ev.target.textContent = 'Dots: ' + (showDots ? 'on' : 'off');
-  };
-  document.getElementById('flip').onclick = () => {
-    facing = facing === 'user' ? 'environment' : 'user';
-    window.__lastPts = null;
-    openCamera();
-  };
-  document.getElementById('stop').onclick = () => {
-    stopCamera();
-    canvas.hidden = true; bar.hidden = true; tag.hidden = true;
-    start.hidden = false;
+  $('dotsBtn').onclick = e => { showDots = !showDots; e.target.textContent = 'Dots: ' + (showDots ? 'on' : 'off'); };
+  $('flip').onclick = () => { facing = facing === 'user' ? 'environment' : 'user'; pts = null; openCamera(); };
+  $('stop').onclick = () => {
+    stopCamera(); setEditing(false);
+    canvas.hidden = true; bar.hidden = true; tag.hidden = true; start.hidden = false;
   };
 
-  // Start loading the face tracker in the background right away, so it's ready sooner.
   loadTracker().catch(() => {});
 </script>
 </body>
