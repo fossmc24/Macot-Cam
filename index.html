@@ -21,13 +21,14 @@
     font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     overflow: hidden;
   }
-  video {
+  /* The raw camera feed stays hidden; we draw it (plus the filter) onto the canvas. */
+  video { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  canvas {
     position: fixed; inset: 0;
     width: 100%; height: 100%;
     object-fit: cover;
     background: #000;
   }
-  video.mirror { transform: scaleX(-1); }
   .start {
     position: fixed; inset: 0;
     display: flex; flex-direction: column;
@@ -40,26 +41,27 @@
   button {
     font: inherit; font-weight: 700;
     border: 0; border-radius: 999px;
-    padding: 14px 28px;
+    padding: 14px 24px;
     background: var(--accent); color: #1a1200;
     cursor: pointer;
   }
   button:focus-visible { outline: 3px solid var(--fg); outline-offset: 3px; }
   .error { color: var(--danger); }
   .bar {
-    position: fixed; left: 0; right: 0;
-    bottom: 0;
-    display: flex; justify-content: center; gap: 12px;
+    position: fixed; left: 0; right: 0; bottom: 0;
+    display: flex; justify-content: center; flex-wrap: wrap; gap: 10px;
     padding: 16px max(16px, env(safe-area-inset-right)) calc(20px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
     background: linear-gradient(transparent, rgba(0,0,0,.6));
   }
+  .bar button { padding: 12px 18px; }
   .bar button.ghost { background: rgba(255,255,255,.18); color: var(--fg); backdrop-filter: blur(6px); }
   .tag {
     position: fixed;
     top: calc(12px + env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left));
     font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
-    background: rgba(0,0,0,.5); padding: 6px 10px; border-radius: 6px;
+    background: rgba(0,0,0,.55); padding: 6px 10px; border-radius: 6px;
   }
+  .tag.ok { color: #7ee2a8; }
   .help {
     position: fixed; inset: 0;
     overflow-y: auto;
@@ -77,7 +79,8 @@
 </style>
 </head>
 <body>
-  <video id="cam" class="mirror" playsinline autoplay muted hidden></video>
+  <video id="cam" playsinline autoplay muted></video>
+  <canvas id="out" hidden></canvas>
 
   <div class="start" id="start">
     <h1>Mascot Cam Test</h1>
@@ -87,69 +90,266 @@
   </div>
 
   <div class="help" id="help" hidden>
-    <h2 id="helpTitle">Your camera is turned off for this site</h2>
-    <p id="helpIntro">Your phone won't let a website open Settings for you. Follow these steps, then tap “Try again.”</p>
+    <h2>Your camera is turned off for this site</h2>
+    <p>Your phone won't let a website open Settings for you. Follow these steps, then tap “Try again.”</p>
     <ol id="helpSteps"></ol>
     <button id="retry">Try again</button>
     <p class="note" id="helpNote"></p>
     <p class="note" id="diag"></p>
   </div>
 
-  <div class="tag" id="tag" hidden>Front camera</div>
+  <div class="tag" id="tag" hidden>Loading face tracker…</div>
 
   <div class="bar" id="bar" hidden>
-    <button class="ghost" id="flip">Flip camera</button>
+    <button id="filterBtn">Filter: Bear</button>
+    <button class="ghost" id="dotsBtn">Dots: off</button>
+    <button class="ghost" id="flip">Flip</button>
     <button class="ghost" id="stop">Stop</button>
   </div>
 
-<script>
+<script type="module">
+  // Face tracking library (Google MediaPipe). Pinned version so it never changes under us.
+  import { FaceLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
+
   const video = document.getElementById('cam');
+  const canvas = document.getElementById('out');
+  const ctx = canvas.getContext('2d');
   const start = document.getElementById('start');
   const bar = document.getElementById('bar');
   const tag = document.getElementById('tag');
   const err = document.getElementById('err');
-  let stream = null;
-  let facing = 'user'; // 'user' = front camera, 'environment' = back camera
 
-  function showError(msg) {
-    err.textContent = msg;
-    err.hidden = false;
+  let stream = null;
+  let facing = 'user';          // 'user' = front camera, 'environment' = back camera
+  let landmarker = null;        // the face tracker, loaded once
+  let running = false;
+  let lastVideoTime = -1;
+  let showDots = false;
+  const FILTERS = ['Bear', 'Tiger', 'None'];
+  let filterIndex = 0;
+
+  // ---------- Face tracker ----------
+  let trackerPromise = null;
+  function loadTracker() {
+    // Only ever load it once, even if asked twice at the same time.
+    if (!trackerPromise) trackerPromise = createTracker().catch(e => { trackerPromise = null; throw e; });
+    return trackerPromise;
   }
+  async function createTracker() {
+    const files = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+    const opts = (delegate) => ({
+      baseOptions: {
+        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+        delegate
+      },
+      runningMode: 'VIDEO',
+      numFaces: 1
+    });
+    try {
+      landmarker = await FaceLandmarker.createFromOptions(files, opts('GPU'));
+    } catch (e) {
+      // Some phones can't use the graphics chip for this; fall back to the regular processor.
+      landmarker = await FaceLandmarker.createFromOptions(files, opts('CPU'));
+    }
+    return landmarker;
+  }
+
+  // ---------- Camera ----------
+  function showError(msg) { err.textContent = msg; err.hidden = false; }
 
   async function openCamera() {
     err.hidden = true;
-    if (!window.isSecureContext) {
-      return showError('This page must be opened with https:// for the camera to work.');
-    }
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      return showError('This browser does not support the camera. Try Safari or Chrome.');
-    }
+    if (!window.isSecureContext) return showError('This page must be opened with https:// for the camera to work.');
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return showError('This browser does not support the camera. Try Safari or Chrome.');
     stopCamera();
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false
       });
-      video.srcObject = stream;
-      video.classList.toggle('mirror', facing === 'user');
-      video.hidden = false;
-      start.hidden = true;
-      bar.hidden = false;
-      tag.hidden = false;
-      tag.textContent = facing === 'user' ? 'Front camera' : 'Back camera';
     } catch (e) {
       start.hidden = false;
-      if (e.name === 'NotAllowedError') {
-        showHelp(e);
-      } else if (e.name === 'NotFoundError') {
-        showError('No camera was found on this device.');
-      } else {
-        showError('Could not start the camera: ' + e.message);
-      }
+      if (e.name === 'NotAllowedError') showHelp(e);
+      else if (e.name === 'NotFoundError') showError('No camera was found on this device.');
+      else showError('Could not start the camera: ' + e.message);
+      return;
+    }
+    video.srcObject = stream;
+    await video.play().catch(() => {});
+    start.hidden = true;
+    canvas.hidden = false;
+    bar.hidden = false;
+    tag.hidden = false;
+    running = true;
+    requestAnimationFrame(loop);
+
+    if (!landmarker) {
+      setTag('Loading face tracker…', false);
+      try { await loadTracker(); }
+      catch (e) { setTag('Face tracker failed to load: ' + e.message, false); }
     }
   }
 
-  // Work out which browser the person is using, so we show the right steps.
+  function stopCamera() {
+    running = false;
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = null;
+  }
+
+  function setTag(text, ok) {
+    if (tag.textContent !== text) tag.textContent = text;
+    tag.classList.toggle('ok', !!ok);
+  }
+
+  // ---------- Main loop: draw camera, find face, draw filter ----------
+  function loop() {
+    if (!running) return;
+    const w = video.videoWidth, h = video.videoHeight;
+    if (w && h) {
+      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+      const mirror = facing === 'user';
+
+      // 1. Draw the camera picture (mirrored for selfie view).
+      ctx.save();
+      if (mirror) { ctx.translate(w, 0); ctx.scale(-1, 1); }
+      ctx.drawImage(video, 0, 0, w, h);
+      ctx.restore();
+
+      // 2. Find the face.
+      if (landmarker && video.currentTime !== lastVideoTime) {
+        lastVideoTime = video.currentTime;
+        const result = landmarker.detectForVideo(video, performance.now());
+        const face = result.faceLandmarks && result.faceLandmarks[0];
+        if (face) {
+          // Turn the tracker's 0–1 numbers into pixel spots on the canvas.
+          const pts = face.map(p => ({ x: (mirror ? 1 - p.x : p.x) * w, y: p.y * h }));
+          window.__lastPts = pts;
+          setTag('Face found ✓', true);
+        } else {
+          window.__lastPts = null;
+          setTag('Looking for a face…', false);
+        }
+      }
+
+      // 3. Draw the filter on top.
+      const pts = window.__lastPts;
+      if (pts) {
+        if (showDots) drawDots(pts);
+        const name = FILTERS[filterIndex];
+        if (name === 'Bear') drawBear(pts);
+        if (name === 'Tiger') drawTiger(pts);
+      }
+    }
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- Face measurements ----------
+  // Key spots on the face (MediaPipe's numbering).
+  const P = { forehead: 10, chin: 152, nose: 1, leftFace: 234, rightFace: 454, eyeA: 33, eyeB: 263, lipTop: 13, lipBottom: 14, cheekA: 205, cheekB: 425 };
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+  function measure(pts) {
+    const eyeA = pts[P.eyeA], eyeB = pts[P.eyeB];
+    // Keep the angle pointing left-to-right on screen, whichever eye is on the left.
+    const [l, r] = eyeA.x < eyeB.x ? [eyeA, eyeB] : [eyeB, eyeA];
+    return {
+      size: dist(pts[P.leftFace], pts[P.rightFace]),   // face width in pixels
+      angle: Math.atan2(r.y - l.y, r.x - l.x),          // head tilt
+      top: pts[P.forehead],
+      nose: pts[P.nose],
+      mouthOpen: dist(pts[P.lipTop], pts[P.lipBottom]) / dist(pts[P.forehead], pts[P.chin])
+    };
+  }
+
+  // Draw something in "face space": centred on a point, turned with the head, scaled to face size.
+  function inFaceSpace(at, m, draw) {
+    ctx.save();
+    ctx.translate(at.x, at.y);
+    ctx.rotate(m.angle);
+    draw(m.size);
+    ctx.restore();
+  }
+
+  function circle(x, y, r, fill) {
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = fill; ctx.fill();
+  }
+
+  // ---------- Test filters ----------
+  function drawBear(pts) {
+    const m = measure(pts);
+    // Ears on top of the head
+    inFaceSpace(m.top, m, s => {
+      for (const side of [-1, 1]) {
+        circle(side * s * 0.42, -s * 0.28, s * 0.2, '#7a4a24');
+        circle(side * s * 0.42, -s * 0.28, s * 0.11, '#e9a8a0');
+      }
+    });
+    // Cheeks
+    for (const i of [P.cheekA, P.cheekB]) {
+      inFaceSpace(pts[i], m, s => { ctx.globalAlpha = 0.45; circle(0, 0, s * 0.09, '#ff6f91'); ctx.globalAlpha = 1; });
+    }
+    // Nose
+    inFaceSpace(m.nose, m, s => {
+      ctx.beginPath();
+      ctx.ellipse(0, 0, s * 0.12, s * 0.085, 0, 0, Math.PI * 2);
+      ctx.fillStyle = '#2b1a10'; ctx.fill();
+      circle(-s * 0.035, -s * 0.03, s * 0.025, 'rgba(255,255,255,.6)');
+    });
+    roarIfMouthOpen(m);
+  }
+
+  function drawTiger(pts) {
+    const m = measure(pts);
+    inFaceSpace(m.top, m, s => {
+      // Pointy ears
+      for (const side of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(side * s * 0.25, -s * 0.12);
+        ctx.lineTo(side * s * 0.48, -s * 0.5);
+        ctx.lineTo(side * s * 0.58, -s * 0.08);
+        ctx.closePath();
+        ctx.fillStyle = '#f08a1c'; ctx.fill();
+        ctx.lineWidth = s * 0.03; ctx.strokeStyle = '#1b1b1b'; ctx.stroke();
+      }
+      // Forehead stripes
+      ctx.strokeStyle = '#1b1b1b'; ctx.lineCap = 'round'; ctx.lineWidth = s * 0.045;
+      for (const dx of [-0.12, 0, 0.12]) {
+        ctx.beginPath(); ctx.moveTo(dx * s, s * 0.02); ctx.lineTo(dx * s * 0.7, s * 0.2); ctx.stroke();
+      }
+    });
+    // Whiskers + nose
+    inFaceSpace(m.nose, m, s => {
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = s * 0.012; ctx.lineCap = 'round';
+      for (const side of [-1, 1]) for (const dy of [-0.03, 0.02, 0.07]) {
+        ctx.beginPath(); ctx.moveTo(side * s * 0.12, s * 0.06); ctx.lineTo(side * s * 0.42, s * (0.06 + dy)); ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.08, -s * 0.02); ctx.lineTo(s * 0.08, -s * 0.02); ctx.lineTo(0, s * 0.07); ctx.closePath();
+      ctx.fillStyle = '#ff7aa2'; ctx.fill();
+    });
+    roarIfMouthOpen(m);
+  }
+
+  // Proves expressions work: open your mouth and the mascot roars.
+  function roarIfMouthOpen(m) {
+    if (m.mouthOpen < 0.12) return;
+    inFaceSpace({ x: m.nose.x, y: m.top.y }, m, s => {
+      ctx.font = `900 ${Math.round(s * 0.32)}px system-ui, -apple-system, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.lineWidth = s * 0.05; ctx.strokeStyle = '#1b1b1b';
+      ctx.strokeText('ROAR!', 0, -s * 0.62);
+      ctx.fillStyle = '#ffb020';
+      ctx.fillText('ROAR!', 0, -s * 0.62);
+    });
+  }
+
+  function drawDots(pts) {
+    ctx.fillStyle = 'rgba(126, 226, 168, .85)';
+    const r = Math.max(1.5, canvas.width / 500);
+    for (const p of pts) { ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill(); }
+  }
+
+  // ---------- Camera-blocked help ----------
   function whichBrowser() {
     const ua = navigator.userAgent;
     const isIOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -164,58 +364,14 @@
 
   const STEPS = {
     'ios-safari': {
-      steps: [
-        'Tap <b>aA</b> (or the page icon) on the left side of the address bar.',
-        'Tap <b>Website Settings</b>.',
-        'Tap <b>Camera</b> and choose <b>Allow</b> (or <b>Ask</b>).',
-        'Tap <b>Done</b>, then tap <b>Try again</b> below.'
-      ],
+      steps: ['Tap <b>aA</b> (or the page icon) on the left side of the address bar.', 'Tap <b>Website Settings</b>.', 'Tap <b>Camera</b> and choose <b>Allow</b> (or <b>Ask</b>).', 'Tap <b>Done</b>, then tap <b>Try again</b> below.'],
       note: 'Still blocked? Open the Settings app → Apps → Safari → Camera, and choose Ask or Allow. Then come back and reload this page.'
     },
-    'ios-chrome': {
-      steps: [
-        'Open the iPhone <b>Settings</b> app.',
-        'Tap <b>Apps</b>, then <b>Chrome</b>.',
-        'Turn on <b>Camera</b>.',
-        'Come back here and tap <b>Try again</b>.'
-      ],
-      note: 'If Chrome asks again, tap Allow.'
-    },
-    'ios-firefox': {
-      steps: [
-        'Open the iPhone <b>Settings</b> app.',
-        'Tap <b>Apps</b>, then <b>Firefox</b>.',
-        'Turn on <b>Camera</b>.',
-        'Come back here and tap <b>Try again</b>.'
-      ],
-      note: ''
-    },
-    'ios-inapp': {
-      steps: [
-        'This page opened inside another app, which blocks the camera.',
-        'Tap the <b>⋯</b> or share button in the corner.',
-        'Choose <b>Open in Safari</b> (or Open in browser).',
-        'Tap <b>Turn on camera</b> again there.'
-      ],
-      note: ''
-    },
-    'android-chrome': {
-      steps: [
-        'Tap the <b>icon left of the web address</b>.',
-        'Tap <b>Permissions</b> (or Site settings).',
-        'Turn on <b>Camera</b>.',
-        'Tap <b>Try again</b> below.'
-      ],
-      note: ''
-    },
-    'desktop': {
-      steps: [
-        'Click the <b>icon left of the web address</b>.',
-        'Set <b>Camera</b> to <b>Allow</b>.',
-        'Click <b>Try again</b> below.'
-      ],
-      note: ''
-    }
+    'ios-chrome': { steps: ['Open the iPhone <b>Settings</b> app.', 'Tap <b>Apps</b>, then <b>Chrome</b>.', 'Turn on <b>Camera</b>.', 'Come back here and tap <b>Try again</b>.'], note: 'If Chrome asks again, tap Allow.' },
+    'ios-firefox': { steps: ['Open the iPhone <b>Settings</b> app.', 'Tap <b>Apps</b>, then <b>Firefox</b>.', 'Turn on <b>Camera</b>.', 'Come back here and tap <b>Try again</b>.'], note: '' },
+    'ios-inapp': { steps: ['This page opened inside another app, which blocks the camera.', 'Tap the <b>⋯</b> or share button in the corner.', 'Choose <b>Open in Safari</b> (or Open in browser).', 'Tap <b>Turn on camera</b> again there.'], note: '' },
+    'android-chrome': { steps: ['Tap the <b>icon left of the web address</b>.', 'Tap <b>Permissions</b> (or Site settings).', 'Turn on <b>Camera</b>.', 'Tap <b>Try again</b> below.'], note: '' },
+    'desktop': { steps: ['Click the <b>icon left of the web address</b>.', 'Set <b>Camera</b> to <b>Allow</b>.', 'Click <b>Try again</b> below.'], note: '' }
   };
 
   async function showHelp(e) {
@@ -223,40 +379,43 @@
     let perm = 'unknown';
     try { perm = (await navigator.permissions.query({ name: 'camera' })).state; } catch (_) {}
     document.getElementById('diag').textContent =
-      'Details: browser=' + whichBrowser() +
-      ' · address=' + location.protocol + '//' + location.host +
-      ' · permission=' + perm +
-      ' · error=' + e.name + ' (' + e.message + ')';
+      'Details: browser=' + whichBrowser() + ' · address=' + location.protocol + '//' + location.host +
+      ' · permission=' + perm + ' · error=' + e.name + ' (' + e.message + ')';
     document.getElementById('helpSteps').innerHTML = info.steps.map(s => '<li>' + s + '</li>').join('');
     const note = document.getElementById('helpNote');
-    note.textContent = info.note;
-    note.hidden = !info.note;
+    note.textContent = info.note; note.hidden = !info.note;
     start.hidden = true;
     document.getElementById('help').hidden = false;
   }
 
+  // ---------- Buttons ----------
+  document.getElementById('go').onclick = openCamera;
   document.getElementById('retry').onclick = () => {
     document.getElementById('help').hidden = true;
     start.hidden = false;
-    // Safari sometimes only picks up the new setting after a reload.
-    if (whichBrowser().startsWith('ios')) { location.reload(); } else { openCamera(); }
+    if (whichBrowser().startsWith('ios')) location.reload(); else openCamera();
   };
-
-  function stopCamera() {
-    if (stream) stream.getTracks().forEach(t => t.stop());
-    stream = null;
-  }
-
-  document.getElementById('go').onclick = openCamera;
+  document.getElementById('filterBtn').onclick = (ev) => {
+    filterIndex = (filterIndex + 1) % FILTERS.length;
+    ev.target.textContent = 'Filter: ' + FILTERS[filterIndex];
+  };
+  document.getElementById('dotsBtn').onclick = (ev) => {
+    showDots = !showDots;
+    ev.target.textContent = 'Dots: ' + (showDots ? 'on' : 'off');
+  };
   document.getElementById('flip').onclick = () => {
     facing = facing === 'user' ? 'environment' : 'user';
+    window.__lastPts = null;
     openCamera();
   };
   document.getElementById('stop').onclick = () => {
     stopCamera();
-    video.hidden = true; bar.hidden = true; tag.hidden = true;
+    canvas.hidden = true; bar.hidden = true; tag.hidden = true;
     start.hidden = false;
   };
+
+  // Start loading the face tracker in the background right away, so it's ready sooner.
+  loadTracker().catch(() => {});
 </script>
 </body>
 </html>
