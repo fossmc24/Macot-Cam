@@ -53,6 +53,7 @@
   button:focus-visible { outline: 3px solid var(--fg); outline-offset: 3px; }
   button.ghost { background: rgba(255,255,255,.16); color: var(--fg); }
   .error { color: var(--danger); }
+  .ver { font-size: 12px; opacity: .6; }
 
   .bar {
     position: fixed; left: 0; right: 0; bottom: 0;
@@ -152,6 +153,7 @@
     <p>Build your own mascot face. Tap the button, then tap “Allow” when your phone asks to use the camera.</p>
     <button id="go">Turn on camera</button>
     <p class="error" id="err" hidden></p>
+    <p class="ver">Version 9</p>
   </div>
 
   <div class="help" id="help" hidden>
@@ -269,9 +271,9 @@
       }},
       // "side" ears attach to each side of your face at ear level (one ear per side, drawn
       // pointing outward). hit = tap area for one ear; cy/r frame the pair in the tray picture.
-      { id: 'dogEars', name: 'Floppy ears', tip: 'shake your head', color: '#8a5a32', side: true, cy: 0.2, r: 0.75,
-        hit: { cx: .04, cy: .22, r: .32 }, draw(g, s, c, f) {
-        g.save(); g.translate(0, -s * .1);                                      // hinge near the top of your ear
+      { id: 'dogEars', name: 'Floppy ears', tip: 'shake your head', color: '#8a5a32', side: true, cy: 0.34, r: 0.8,
+        hit: { cx: .04, cy: .34, r: .34 }, draw(g, s, c, f) {
+        g.save(); g.translate(0, s * .02);                                      // hinge at eye level, where your real ear starts
         g.rotate(-f.brow * .5 - f.bounce * .4 + f.swing * 1.1 * f.sx);          // swings with your head
         g.beginPath();
         g.moveTo(-s * .05, 0);
@@ -281,12 +283,12 @@
         g.fillStyle = c; g.fill(); g.strokeStyle = shade(c, -.3); g.lineWidth = s * .012; g.stroke();
         g.restore();
       }},
-      { id: 'elephantEars', name: 'Elephant ears', tip: 'raise your eyebrows to flap', color: '#9aa0a6', side: true, cy: 0.05, r: 0.85,
-        hit: { cx: .2, cy: .05, r: .36 }, draw(g, s, c, f) {
+      { id: 'elephantEars', name: 'Elephant ears', tip: 'raise your eyebrows to flap', color: '#9aa0a6', side: true, cy: 0.16, r: 0.85,
+        hit: { cx: .2, cy: .16, r: .36 }, draw(g, s, c, f) {
         const flap = 1 + Math.sin(f.t * 12) * .3 * f.brow + Math.abs(f.swing) * .3;
         g.save(); g.scale(flap, 1);                                              // flaps outward from the side of your face
-        g.beginPath(); g.ellipse(s * .2, s * .05, s * .24, s * .33, 0, 0, Math.PI * 2); g.fillStyle = c; g.fill();
-        g.beginPath(); g.ellipse(s * .2, s * .05, s * .15, s * .23, 0, 0, Math.PI * 2); g.fillStyle = '#e7b3bb'; g.fill();
+        g.beginPath(); g.ellipse(s * .2, s * .16, s * .24, s * .33, 0, 0, Math.PI * 2); g.fillStyle = c; g.fill();
+        g.beginPath(); g.ellipse(s * .2, s * .16, s * .15, s * .23, 0, 0, Math.PI * 2); g.fillStyle = '#e7b3bb'; g.fill();
         g.restore();
       }},
       { id: 'mouseEars', name: 'Mouse ears', tip: 'move your head', color: '#1b1b1b', cy: -0.32, r: 0.66, draw(g, s, c, f) {
