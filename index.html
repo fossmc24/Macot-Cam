@@ -224,18 +224,90 @@
   const both = fn => { fn(-1); fn(1); };
 
   const PARTS = {
-    head: [
-      { id: 'bearEars', name: 'Bear ears', color: '#7a4a24', cy: -0.28, r: 0.62, draw(g, s, c) {
-        both(k => { circle(g, k * s * .42, -s * .28, s * .2, c); circle(g, k * s * .42, -s * .28, s * .11, '#e9a8a0'); });
-      }},
-      { id: 'tigerEars', name: 'Tiger ears', color: '#f08a1c', cy: -0.25, r: 0.62, draw(g, s, c) {
+    // Ear parts get "f" too: f.brow = eyebrows raised (0–1), f.blink (0–1),
+    // f.swing / f.bounce = how much your head just moved (for floppy physics), f.t = time.
+    ears: [
+      { id: 'bearEars', name: 'Bear ears', tip: 'raise your eyebrows', color: '#7a4a24', cy: -0.28, r: 0.62, draw(g, s, c, f) {
         both(k => {
-          g.beginPath(); g.moveTo(k * s * .25, -s * .12); g.lineTo(k * s * .48, -s * .5); g.lineTo(k * s * .58, -s * .08); g.closePath();
+          g.save(); g.translate(k * s * .42, -s * .28);
+          g.rotate(k * Math.sin(f.t * 18) * .3 * f.brow + f.swing * .25);   // wiggle
+          circle(g, 0, 0, s * .2, c); circle(g, 0, 0, s * .11, '#e9a8a0');
+          g.restore();
+        });
+      }},
+      { id: 'tigerEars', name: 'Tiger ears', tip: 'raise your eyebrows or blink', color: '#f08a1c', cy: -0.25, r: 0.62, draw(g, s, c, f) {
+        both(k => {
+          g.save(); g.translate(k * s * .4, -s * .1 - f.brow * s * .1);          // perk up
+          g.rotate(k * (f.blink * .35 + Math.sin(f.t * 30) * .05 * f.blink));      // twitch on blink
+          g.beginPath(); g.moveTo(-k * s * .15, -s * .02); g.lineTo(k * s * .08, -s * .4); g.lineTo(k * s * .18, s * .02); g.closePath();
           g.fillStyle = c; g.fill(); g.lineWidth = s * .03; g.strokeStyle = '#1b1b1b'; g.stroke();
+          g.restore();
         });
         g.strokeStyle = '#1b1b1b'; g.lineCap = 'round'; g.lineWidth = s * .045;
         for (const dx of [-.12, 0, .12]) { g.beginPath(); g.moveTo(dx * s, s * .02); g.lineTo(dx * s * .7, s * .2); g.stroke(); }
       }},
+      { id: 'catEars', name: 'Cat ears', tip: 'raise your eyebrows or blink', color: '#2b2b2b', cy: -0.3, r: 0.48, draw(g, s, c, f) {
+        both(k => {
+          g.save(); g.translate(k * s * .36, -s * .12 - f.brow * s * .12);
+          g.rotate(k * (.15 - f.brow * .15 + f.blink * .4) + f.swing * .15);
+          g.beginPath(); g.moveTo(-s * .14, 0); g.quadraticCurveTo(-s * .06, -s * .3, 0, -s * .38); g.quadraticCurveTo(s * .06, -s * .3, s * .14, 0); g.closePath();
+          g.fillStyle = c; g.fill();
+          g.beginPath(); g.moveTo(-s * .07, -s * .03); g.quadraticCurveTo(0, -s * .26, s * .07, -s * .03); g.closePath();
+          g.fillStyle = '#f4a7b9'; g.fill();
+          g.restore();
+        });
+      }},
+      { id: 'bunnyEars', name: 'Bunny ears', tip: 'raise your eyebrows to stand them up', color: '#f2f2f2', cy: -0.55, r: 0.58, draw(g, s, c, f) {
+        both(k => {
+          g.save(); g.translate(k * s * .17, -s * .28);
+          g.rotate(k * (1 - f.brow) * .6 + f.swing * .5);                          // droop unless eyebrows are up
+          g.beginPath(); g.ellipse(0, -s * .42, s * .1, s * .42, 0, 0, Math.PI * 2); g.fillStyle = c; g.fill();
+          g.strokeStyle = shade(c, -.25); g.lineWidth = s * .012; g.stroke();
+          g.beginPath(); g.ellipse(0, -s * .4, s * .05, s * .32, 0, 0, Math.PI * 2); g.fillStyle = '#f7a8bd'; g.fill();
+          g.restore();
+        });
+      }},
+      { id: 'dogEars', name: 'Floppy ears', tip: 'shake your head', color: '#8a5a32', cy: 0.3, r: 0.72, draw(g, s, c, f) {
+        both(k => {
+          g.save(); g.translate(k * s * .47, s * .08);
+          g.rotate(-k * f.brow * .55 + f.swing * 1.1 + f.bounce * k * .4);        // swings with your head
+          g.beginPath();
+          g.moveTo(-s * .06, 0);
+          g.bezierCurveTo(-s * .2, s * .15, -s * .16, s * .5, 0, s * .52);
+          g.bezierCurveTo(s * .16, s * .5, s * .18, s * .15, s * .06, 0);
+          g.closePath();
+          g.fillStyle = c; g.fill(); g.strokeStyle = shade(c, -.3); g.lineWidth = s * .012; g.stroke();
+          g.restore();
+        });
+      }},
+      { id: 'elephantEars', name: 'Elephant ears', tip: 'raise your eyebrows to flap', color: '#9aa0a6', cy: 0.12, r: 0.82, draw(g, s, c, f) {
+        const flap = 1 + Math.sin(f.t * 12) * .3 * f.brow + Math.abs(f.swing) * .3;
+        both(k => {
+          g.save(); g.translate(k * s * .45, s * .1); g.scale(flap, 1);
+          g.beginPath(); g.ellipse(k * s * .2, 0, s * .24, s * .33, 0, 0, Math.PI * 2); g.fillStyle = c; g.fill();
+          g.beginPath(); g.ellipse(k * s * .2, 0, s * .15, s * .23, 0, 0, Math.PI * 2); g.fillStyle = '#e7b3bb'; g.fill();
+          g.restore();
+        });
+      }},
+      { id: 'mouseEars', name: 'Mouse ears', tip: 'move your head', color: '#1b1b1b', cy: -0.32, r: 0.66, draw(g, s, c, f) {
+        both(k => {
+          g.save(); g.translate(k * s * .4, -s * .32 + f.bounce * s * .15);
+          g.rotate(f.swing * .3); g.scale(1 + f.bounce * .2, 1 - f.bounce * .2);
+          circle(g, 0, 0, s * .24, c); circle(g, 0, 0, s * .14, shade(c, .25));
+          g.restore();
+        });
+      }},
+      { id: 'antennae', name: 'Antennae', tip: 'move your head', color: '#00843d', cy: -0.35, r: 0.48, draw(g, s, c, f) {
+        g.strokeStyle = c; g.lineWidth = s * .025; g.lineCap = 'round';
+        both(k => {
+          const bx = k * s * .14, by = -s * .1;
+          const tx = k * s * .3 + f.swing * s * .3, ty = -s * .62 + f.bounce * s * .2 - f.brow * s * .08;
+          g.beginPath(); g.moveTo(bx, by); g.quadraticCurveTo(k * s * .12 + f.swing * s * .1, -s * .4, tx, ty); g.stroke();
+          circle(g, tx, ty, s * .065, shade(c, .35));
+        });
+      }}
+    ],
+    head: [
       { id: 'horns', name: 'Horns', color: '#c8102e', cy: -0.3, r: 0.5, draw(g, s, c) {
         both(k => {
           g.beginPath(); g.moveTo(k * s * .12, -s * .06);
@@ -437,27 +509,31 @@
     ]
   };
   const findPart = (slot, id) => PARTS[slot].find(p => p.id === id);
+  for (const id of ['tongue', 'teeth', 'lips', 'bubble', 'beak', 'fire']) findPart('mouth', id).tip = 'open your mouth';
 
   // Where each slot sits on the face. Cheeks appear twice (mirrored).
   const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
   // Listed in drawing order (first = furthest back).
   const SLOTS = [
     { key: 'facial', label: 'Facial hair', anchors: [p => p[13]] },
+    { key: 'ears',   label: 'Ears',        anchors: [p => p[10]] },
     { key: 'cheeks', label: 'Cheeks',      anchors: [p => p[205], p => p[425]] },
     { key: 'nose',   label: 'Nose',        anchors: [p => p[1]] },
     { key: 'mouth',  label: 'Mouth',       anchors: [p => mid(p[13], p[14])] },
     { key: 'eyes',   label: 'Eyes',        anchors: [p => mid(p[33], p[263])] },
     { key: 'head',   label: 'Head',        anchors: [p => p[10]] }
   ];
-  const TAB_ORDER = ['presets', 'head', 'eyes', 'nose', 'mouth', 'cheeks', 'facial'];
+  const TAB_ORDER = ['presets', 'head', 'ears', 'eyes', 'nose', 'mouth', 'cheeks', 'facial'];
 
   const COLORS = ['#7a4a24', '#f08a1c', '#c8102e', '#0b3d91', '#00843d', '#ffb81c', '#6a2c91', '#1b1b1b', '#ffffff'];
 
   const blankSlot = () => ({ part: null, dx: 0, dy: 0, scale: 1, color: null });
   const slotWith = (slot, id, color) => ({ part: id, dx: 0, dy: 0, scale: 1, color: color || findPart(slot, id).color });
   const PRESETS = [
-    { name: 'Bear',  icon: '🐻', build: () => ({ head: slotWith('head', 'bearEars'), nose: slotWith('nose', 'bearNose'), cheeks: slotWith('cheeks', 'blush') }) },
-    { name: 'Tiger', icon: '🐯', build: () => ({ head: slotWith('head', 'tigerEars'), nose: slotWith('nose', 'tigerNose'), facial: slotWith('facial', 'whiskers'), mouth: slotWith('mouth', 'teeth') }) },
+    { name: 'Bear',  icon: '🐻', build: () => ({ ears: slotWith('ears', 'bearEars'), nose: slotWith('nose', 'bearNose'), cheeks: slotWith('cheeks', 'blush') }) },
+    { name: 'Puppy', icon: '🐶', build: () => ({ ears: slotWith('ears', 'dogEars'), nose: slotWith('nose', 'bearNose'), mouth: slotWith('mouth', 'tongue') }) },
+    { name: 'Bunny', icon: '🐰', build: () => ({ ears: slotWith('ears', 'bunnyEars'), nose: slotWith('nose', 'tigerNose'), mouth: slotWith('mouth', 'buck'), facial: slotWith('facial', 'whiskers') }) },
+    { name: 'Tiger', icon: '🐯', build: () => ({ ears: slotWith('ears', 'tigerEars'), nose: slotWith('nose', 'tigerNose'), facial: slotWith('facial', 'whiskers'), mouth: slotWith('mouth', 'teeth') }) },
     { name: 'Fan',   icon: '📣', build: () => ({ head: slotWith('head', 'cap'), eyes: slotWith('eyes', 'eyeBlack'), cheeks: slotWith('cheeks', 'stripes') }) },
     { name: 'Monster', icon: '👹', build: () => ({ head: slotWith('head', 'horns'), mouth: slotWith('mouth', 'fire'), eyes: slotWith('eyes', 'mask') }) },
     { name: 'Bird',  icon: '🐦', build: () => ({ head: slotWith('head', 'crown'), mouth: slotWith('mouth', 'beak'), cheeks: slotWith('cheeks', 'blush') }) },
@@ -478,6 +554,8 @@
     if (saved) {
       // Older saves kept whiskers/mustache/beard under "mouth" — move them to "facial".
       if (saved.mouth && saved.mouth.part && !findPart('mouth', saved.mouth.part)) { saved.facial = saved.mouth; saved.mouth = null; }
+      // Older saves kept ears under "head" — move them to "ears".
+      if (saved.head && saved.head.part && !findPart('head', saved.head.part) && findPart('ears', saved.head.part)) { saved.ears = saved.head; saved.head = null; }
       for (const s of SLOTS) mascot[s.key] = (saved[s.key] && (!saved[s.key].part || findPart(s.key, saved[s.key].part))) ? saved[s.key] : blankSlot();
     }
   } catch (_) {}
@@ -498,7 +576,8 @@
         modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
         delegate
       },
-      runningMode: 'VIDEO', numFaces: 1
+      runningMode: 'VIDEO', numFaces: 1,
+      outputFaceBlendshapes: true      // expression readings: eyebrows up, blinks, etc.
     });
     try { landmarker = await FaceLandmarker.createFromOptions(files, opts('GPU')); }
     catch (e) { landmarker = await FaceLandmarker.createFromOptions(files, opts('CPU')); }
@@ -563,10 +642,39 @@
       mouthOpen: dist(p[13], p[14]) / dist(p[10], p[152])
     };
   }
-  // Live mouth info handed to every part (thumbnails use a pretend half-open mouth).
+  // ---- Expressions (from the tracker's readings) ----
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const expr = { brow: 0, blink: 0 };
+  function readExpressions(bs) {
+    if (!bs) return;
+    const get = n => (bs.categories.find(c => c.categoryName === n) || { score: 0 }).score;
+    const browRaw = Math.max(get('browInnerUp'), (get('browOuterUpLeft') + get('browOuterUpRight')) / 2);
+    expr.brow += (clamp((browRaw - .12) / .45, 0, 1) - expr.brow) * .4;
+    const blinkRaw = (get('eyeBlinkLeft') + get('eyeBlinkRight')) / 2;
+    expr.blink += (clamp((blinkRaw - .3) / .4, 0, 1) - expr.blink) * .6;
+  }
+
+  // ---- Floppy physics: ears lag behind when your head moves, then spring back ----
+  const phys = { sw: 0, sv: 0, by: 0, bv: 0, px: null, py: 0, pa: 0 };
+  function stepPhysics() {
+    const a = pts[10], s = faceM.size;
+    if (phys.px !== null) {
+      const vx = (a.x - phys.px) / s, vy = (a.y - phys.py) / s, da = faceM.angle - phys.pa;
+      phys.sv += -phys.sw * .12 - phys.sv * .14 - vx * 3 - da * 1.2;
+      phys.sw = clamp(phys.sw + phys.sv, -1.1, 1.1);
+      phys.bv += -phys.by * .15 - phys.bv * .15 - vy * 3;
+      phys.by = clamp(phys.by + phys.bv, -.6, .6);
+    }
+    phys.px = a.x; phys.py = a.y; phys.pa = faceM.angle;
+  }
+
+  // Live face info handed to every part (thumbnails use pretend values).
   function faceInfo() {
     const s = faceM.size;
-    return { gap: dist(pts[13], pts[14]) / s, w: dist(pts[61], pts[291]) / s, t: performance.now() / 1000 };
+    return {
+      gap: dist(pts[13], pts[14]) / s, w: dist(pts[61], pts[291]) / s, t: performance.now() / 1000,
+      brow: expr.brow, blink: expr.blink, swing: phys.sw, bounce: phys.by
+    };
   }
 
   function loop() {
@@ -592,9 +700,11 @@
             ? fresh.map((q, i) => ({ x: pts[i].x + (q.x - pts[i].x) * .65, y: pts[i].y + (q.y - pts[i].y) * .65 }))
             : fresh;
           faceM = measure(pts);
+          readExpressions(res.faceBlendshapes && res.faceBlendshapes[0]);
+          stepPhysics();
           setTag(editing ? 'Face found ✓ — tap a part to edit' : 'Face found ✓', true);
         } else {
-          pts = null; faceM = null;
+          pts = null; faceM = null; phys.px = null;
           setTag(editing ? 'Look at the camera to edit' : 'Looking for a face…', false);
         }
       }
@@ -788,7 +898,7 @@
     const s = (c.width * .44) / part.r;
     g.translate(c.width / 2, c.height / 2 - part.cy * s);
     const st = mascot[slotKey];
-    part.draw(g, s, st.part === part.id && st.color ? st.color : part.color, Object.assign({ gap: .1, w: .38, t: 0 }, part.thumbF));
+    part.draw(g, s, st.part === part.id && st.color ? st.color : part.color, Object.assign({ gap: .1, w: .38, t: 0, brow: .5, blink: 0, swing: 0, bounce: 0 }, part.thumbF));
     return c;
   }
 
@@ -869,7 +979,7 @@
   function updateSelbar() {
     const has = selected && mascot[selected.slot] && mascot[selected.slot].part;
     const part = has ? findPart(selected.slot, mascot[selected.slot].part) : null;
-    $('selName').textContent = part ? part.name : (currentTab === 'presets' ? 'Pick a mascot to start from' : 'Tap a part on your face to change it');
+    $('selName').textContent = part ? part.name + (part.tip ? ' · ' + part.tip : '') : (currentTab === 'presets' ? 'Pick a mascot to start from' : 'Tap a part on your face to change it');
     for (const id of ['swatches', 'smaller', 'bigger', 'removeBtn']) $(id).hidden = !part;
     if (!part) return;
     const st = mascot[selected.slot];
