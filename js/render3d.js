@@ -74,6 +74,8 @@ export function dispose3D(obj) {
 //  Uploaded GLB / GLTF
 // ---------------------------------------------------------------------
 export function loadGLTF(url) {
+  if (!url) return Promise.resolve({ scene: null, failed: true });
+  if (!loader) return init3D().then(() => loadGLTF(url));   // three.js not up yet
   if (gltfCache.has(url)) return gltfCache.get(url);
   const p = new Promise(res => {
     loader.load(url,
