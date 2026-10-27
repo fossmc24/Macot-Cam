@@ -48,6 +48,7 @@ const PRESETS = [
   { name: '3D Bear', icon: '🧸', build: () => ({ ears: slotWith('ears', 'bearEars3d'), nose: slotWith('nose', 'bearNose3d'), mouth: slotWith('mouth', 'tongue3d') }) },
   { name: '3D Star', icon: '⭐', build: () => ({ head: slotWith('head', 'crown3d'), eyes: slotWith('eyes', 'shades3d'), mouth: slotWith('mouth', 'bubble3d') }) },
   { name: '3D Piggy', icon: '🐷', build: () => ({ ears: slotWith('ears', 'mouseEars3d', '#f4a3b5'), nose: slotWith('nose', 'pigSnout3d'), cheeks: slotWith('cheeks', 'blush') }) },
+  { name: 'Panda', icon: '🐼', build: () => ({ head: slotWith('head', 'pandaHead3d') }) },
   { name: 'Blank', icon: '⬜', build: () => ({}) }
 ];
 function presetState(i) {

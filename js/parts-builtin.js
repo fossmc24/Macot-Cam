@@ -385,6 +385,118 @@ export function buildParts3D(T) {
           return h;
         });
         return g;
+      }},
+      // A whole panda, worn as a costume head. Unlike every other part this
+      // one has to COVER the face rather than sit on it, so it is about one
+      // and a half face widths across and hangs well below the hairline
+      // anchor. It is also drawn BEFORE the invisible head shape (that is
+      // renderOrder -1, this is -2): the shape only exists to hide parts
+      // that swing behind the skull, and left to itself it would carve a
+      // hole in a head meant to swallow it.
+      { id: 'pandaHead3d', name: 'Panda head', tip: 'open your mouth, raise your eyebrows', color: '#f2eee3', cy: -0.41, r: 0.88, build(c) {
+        const g = new T.Group(); g.renderOrder = -2;
+        const fur     = P3.mat(c, { roughness: .95, clearcoat: 0 });
+        const ink     = P3.mat('#272320', { roughness: .8, clearcoat: .05 });
+        const white   = P3.mat('#ffffff', { roughness: .2, clearcoat: 1 });
+        const iris    = P3.mat('#6e4522', { roughness: .15, clearcoat: 1 });
+        const pupil   = P3.mat('#17100c', { roughness: .15, clearcoat: 1 });
+        const inner   = P3.mat('#54222b', { roughness: .55, clearcoat: .3 });
+        const tongueM = P3.mat('#e86b85', { roughness: .4, clearcoat: .6 });
+
+        // Half-extents of the skull. A face placed by eye on a ball this
+        // deep ends up either floating off the cheek or sunk inside it, so
+        // every feature below is hung off the curve itself.
+        const A = .78, B = .82, C = .66;
+        const skullZ = (x, y) => C * Math.sqrt(Math.max(0, 1 - (x / A) ** 2 - (y / B) ** 2));
+        // A little frame lying flat on the fur at (x, y), turned by `tilt`:
+        // inside it, +z is straight out of the head and x/y run along it.
+        const onSkull = (x, y, tilt = 0) => {
+          const z = skullZ(x, y), f = new T.Group();
+          f.position.set(x, y, z);
+          f.quaternion.setFromUnitVectors(new T.Vector3(0, 0, 1),
+            new T.Vector3(x / (A * A), y / (B * B), z / (C * C)).normalize());
+          f.rotateZ(tilt); f.updateMatrix();
+          return f;
+        };
+        // An oval painted on the fur — the eye patches. A squashed ball
+        // pressed into the skull only shows the sliver that pokes out, so
+        // this is a disc whose every point is pushed onto the curve instead.
+        // It is ringed rather than fanned: one ring of triangles spans the
+        // curve with flat chords that sink inside it, leaving an outline.
+        const paint = (mat, x, y, rx, ry, tilt) => {
+          const geo = new T.RingGeometry(.0001, 1, 72, 14), m = onSkull(x, y, tilt).matrix;
+          const pos = geo.attributes.position, v = new T.Vector3();
+          for (let i = 0; i < pos.count; i++) {
+            v.set(pos.getX(i) * rx, pos.getY(i) * ry, 0).applyMatrix4(m);
+            const k = Math.hypot(v.x / A, v.y / B, v.z / C) || 1;
+            v.multiplyScalar(1.006 / k);
+            pos.setXYZ(i, v.x, v.y, v.z);
+          }
+          geo.computeVertexNormals();
+          return new T.Mesh(geo, mat);
+        };
+        // A drawn line — smile, eyebrow — laid along the same curve.
+        const stroke = (mat, pts, r) => new T.Mesh(
+          new T.TubeGeometry(new T.CatmullRomCurve3(pts.map(([x, y]) =>
+            new T.Vector3(x, y, skullZ(x, y) + .008))), 24, r, 10, false), mat);
+
+        const head = new T.Group(); head.position.set(0, -.41, -.05); head.scale.setScalar(1.06); g.add(head);
+        const skull = P3.mesh(new T.SphereGeometry(1, 64, 48), fur);
+        skull.scale.set(A, B, C); head.add(skull);
+
+        const ears = P3.pair(head, side => {
+          const piv = new T.Group(); piv.position.set(.46, .34, -.14); side.add(piv);
+          const o = P3.mesh(new T.SphereGeometry(.26, 32, 24), ink, .10, .20, 0);
+          o.scale.z = .55; piv.add(o);
+          return piv;
+        });
+
+        P3.pair(head, side => side.add(paint(ink, .30, -.10, .165, .25, -.42)));
+
+        const eyes = P3.pair(head, side => {
+          const e = onSkull(.30, -.06); side.add(e);
+          e.add(P3.mesh(new T.SphereGeometry(.105, 32, 24), white, 0, 0, -.052));
+          e.add(P3.mesh(new T.SphereGeometry(.064, 28, 20), iris, 0, 0, .008));
+          e.add(P3.mesh(new T.SphereGeometry(.032, 20, 16), pupil, 0, 0, .048));
+          e.add(P3.mesh(new T.SphereGeometry(.016, 16, 12), white, -.034, .036, .066));
+          return e;
+        });
+
+        const brows = P3.pair(head, side => {
+          const b = stroke(ink, [[.20, .235], [.30, .295], [.41, .245]], .013);
+          side.add(b); return b;
+        });
+
+        const snout = onSkull(0, -.44); head.add(snout);
+        const nose = P3.mesh(new T.SphereGeometry(1, 32, 24), ink, 0, 0, -.012);
+        nose.scale.set(.105, .070, .055); snout.add(nose);
+
+        const smile = stroke(ink, [[-.19, -.55], [-.09, -.625], [0, -.638], [.09, -.625], [.19, -.55]], .018);
+        head.add(smile);
+
+        // The open mouth of the laughing pose, which takes over from the
+        // smile once your own mouth is more than barely open.
+        const jaw = onSkull(0, -.50); head.add(jaw);
+        const maw = P3.mesh(new T.SphereGeometry(1, 32, 24), inner, 0, 0, -.03); jaw.add(maw);
+        const tongue = P3.mesh(new T.SphereGeometry(1, 24, 18), tongueM, 0, 0, -.01); jaw.add(tongue);
+
+        g.userData.update = f => {
+          const open = Math.min(1, f.gap * 3.4);
+          ears.forEach((p, i) => { p.rotation.z = -Math.sin(f.t * 16) * .22 * f.brow - f.swing * .22 * swingK(i); });
+          brows.forEach(b => { b.position.y = f.brow * .055; });
+          eyes.forEach(e => { e.scale.y = 1 - f.blink * .88; });
+          smile.visible = open < .12;
+          jaw.visible = !smile.visible;
+          const w = .115 + open * .045, h = .02 + open * .085;
+          maw.scale.set(w, h, .09); maw.position.y = -h;
+          tongue.scale.set(w * .55, h * .36, .06);
+          tongue.position.y = -h * 1.55;
+        };
+        // Settle the mouth before anyone looks: until the first frame runs
+        // the maw is still an un-scaled ball a whole face wide, which the
+        // admin page would measure and size the part from.
+        g.userData.update({ gap: 0, brow: 0, blink: 0, swing: 0, bounce: 0, t: 0, sx: 1 });
+        return g;
       }}
     ],
     ears: [
