@@ -71,6 +71,10 @@ export function normalizeRecord(r) {
     name: String(r.name || r.id || 'Untitled').trim(),
     slot, type,
     assetUrl: r.assetUrl || null,
+    // Locally-stored art is referenced as local:<id>; assetUrl then holds a
+    // blob URL that is only valid for this page load, so the durable
+    // reference has to travel alongside it.
+    storedUrl: r.storedUrl || null,
     thumbUrl: r.thumbUrl || null,
     anchor,
     offset: vec3(r.offset),

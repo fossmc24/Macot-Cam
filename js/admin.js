@@ -19,8 +19,7 @@ import {
   normalizeRecord, builtinRecords, mergeRecords, newRecord, slugId,
   REACTION_INPUTS, REACTION_PROPS, SLOT_ANCHORS, SIDE_ANCHOR, SLOT_KEYS
 } from './calibration.js';
-import * as Store from './admin-store.js';
-import { isConfigured } from './config.js';
+import * as Store from './backend.js';
 import { primeCache, fetchPublished } from './store.js';
 
 const $ = id => document.getElementById(id);
@@ -449,8 +448,8 @@ function updateTopbar() {
   }
   const who = $('who');
   who.innerHTML = '';
-  if (!isConfigured()) {
-    who.append(el('span', { class: 'tiny', style: 'color:var(--danger)', text: 'Not set up' }));
+  if (Store.isLocal()) {
+    who.append(el('span', { class: 'tiny muted', text: 'Saved on this device' }));
   } else if (user) {
     who.append(el('button', { class: 'ghost tiny', text: 'Sign out', onclick: async () => { await Store.signOut(); user = null; admin = false; updateTopbar(); renderPane(); } }));
   } else {
@@ -525,10 +524,31 @@ function paneLibrary() {
   pane.append(listWrap);
   listWrap.append(buildList());
 
+  const st = Store.localStats();
+  pane.append(el('div', { class: 'group' },
+    el('h3', { text: 'Backup' }),
+    el('p', { class: 'tiny muted', text: Store.isLocal()
+      ? `${st.total} part(s) saved on this device — ${st.published} published, ${st.drafts} draft(s). Clearing your browser data would lose them, so save a backup now and then.`
+      : `${st.total} part(s) still held on this device from before Supabase was set up.` }),
+    el('div', { class: 'row tight' },
+      el('button', { class: 'ghost', text: '⭳ Save a backup file', onclick: exportFlow }),
+      (() => {
+        const inp = el('input', { type: 'file', accept: '.json,application/json', style: 'display:none' });
+        inp.onchange = () => { if (inp.files[0]) importFlow(inp.files[0]); inp.value = ''; };
+        return el('span', {}, el('button', { class: 'ghost', text: '⭱ Restore a backup', onclick: () => inp.click() }), inp);
+      })()
+    ),
+    Store.isLocal()
+      ? el('p', { class: 'tiny muted', text: 'When Supabase is set up later, a "Move to Supabase" button appears here and sends all of this up — no re-calibrating.' })
+      : el('button', { class: 'primary', text: '⤴ Move this device’s parts to Supabase', onclick: migrateFlow, disabled: !(user && admin) || st.total === 0 })
+  ));
+
   pane.append(el('div', { class: 'group' },
     el('h3', { text: 'Security check' }),
-    el('p', { class: 'tiny muted', text: 'Checks what a stranger with only the public key can do. Everything except the first line should say "no".' }),
-    el('button', { class: 'ghost', text: 'Run the check', onclick: runSecurityCheck, disabled: !isConfigured() }),
+    el('p', { class: 'tiny muted', text: Store.isLocal()
+      ? 'Nothing is shared while parts are saved on this device. Run this again once Supabase is set up.'
+      : 'Checks what a stranger with only the public key can do. Everything except the first line should say "no".' }),
+    el('button', { class: 'ghost', text: 'Run the check', onclick: runSecurityCheck }),
     el('div', { id: 'secOut' })
   ));
 
@@ -565,6 +585,61 @@ function paneLibrary() {
   }
 
   return pane;
+}
+
+async function exportFlow() {
+  try {
+    const dump = await Store.exportAll();
+    const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = el('a', {
+      href: url,
+      download: 'mascot-calibration-' + new Date().toISOString().slice(0, 10) + '.json'
+    });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    toast('Backup saved to your downloads.', 'good');
+  } catch (e) { toast('Could not make a backup: ' + e.message, 'bad'); }
+}
+
+async function importFlow(file) {
+  try {
+    const payload = JSON.parse(await file.text());
+    const n = Object.keys(payload.records || {}).length;
+    const r = await ask({
+      title: 'Restore ' + n + ' part(s)?',
+      body: 'From ' + (payload.exportedAt ? new Date(payload.exportedAt).toLocaleString() : 'an unknown date') + '.',
+      okText: 'Restore',
+      fields: [{ key: 'how', label: 'What to do with what is here now', value: 'merge', options: [
+        { value: 'merge', label: 'Keep both — the backup wins where they clash' },
+        { value: 'replace', label: 'Replace everything on this device' }
+      ] }]
+    });
+    if (!r) return;
+    const count = await Store.importAll(payload, { replace: r.how === 'replace' });
+    await reload(false);
+    toast('Restored ' + count + ' part(s).', 'good');
+  } catch (e) { toast('Could not restore: ' + e.message, 'bad'); }
+}
+
+async function migrateFlow() {
+  const st = Store.localStats();
+  const ok = await ask({
+    title: 'Move ' + st.total + ' part(s) to Supabase?',
+    body: 'Uploads the artwork and the calibrations so everyone sees them. What is on this device is left alone, so nothing is lost if it goes wrong.',
+    okText: 'Move them up'
+  });
+  if (!ok) return;
+  toast('Moving…');
+  try {
+    const res = await Store.pushLocalToSupabase((done, total) => toast(`Moving ${done} of ${total}…`));
+    await reload(false);
+    if (res.failed.length) {
+      toast(res.total - res.failed.length + ' moved, ' + res.failed.length + ' failed: ' + res.failed.map(f => f.id).join(', '), 'bad');
+    } else {
+      toast('All ' + res.total + ' moved up ✓', 'good');
+    }
+  } catch (e) { toast('Could not move: ' + e.message, 'bad'); }
 }
 
 async function runSecurityCheck() {
@@ -888,10 +963,10 @@ function paneSave() {
   const pane = el('div', { class: 'pane' });
   if (!current) { pane.append(el('p', { class: 'muted', text: 'Pick a part first.' })); return pane; }
 
-  if (!isConfigured()) {
+  if (Store.isLocal()) {
     pane.append(el('div', { class: 'group' },
-      el('h3', { text: 'Not connected yet' }),
-      el('p', { class: 'small', text: 'Follow SETUP.md and paste your Supabase address and anon key into js/config.js. Until then you can calibrate and see the result, but nothing can be saved.' })));
+      el('h3', { text: 'Saved on this device' }),
+      el('p', { class: 'small muted', text: 'Parts are kept in this browser and show up in the app on this device. Nobody else sees them yet. Back them up from the Library tab, and move them to Supabase when you are ready to share.' })));
   } else if (!user) {
     pane.append(el('div', { class: 'group' },
       el('h3', { text: 'Sign in to save' }),
@@ -902,7 +977,7 @@ function paneSave() {
       el('p', { class: 'small', text: 'Your account is not on the admin list, so saving will be refused. Run Step 4 of SETUP.md with this email: ' + (user.email || '') })));
   }
 
-  const canWrite = isConfigured() && user && admin;
+  const canWrite = Store.isLocal() || (user && admin);
 
   const nameBox = el('input', { type: 'text', value: current.name });
   nameBox.onchange = () => { current.name = nameBox.value.trim().slice(0, 40) || current.name; markDirty(); };
@@ -1063,7 +1138,7 @@ async function deleteFlow() {
   if (!r || r.word.trim().toUpperCase() !== 'DELETE') { if (r) toast('Not deleted.', 'bad'); return; }
   try {
     await Store.deleteRecord(current.id);
-    await Store.deleteAssetAt(current.assetUrl);
+    await Store.deleteAssetAt(current.storedUrl || current.assetUrl);
     delete records[current.id];
     current = null; savedJson = '';
     await refreshAppCache();
@@ -1076,8 +1151,7 @@ async function deleteFlow() {
 //  Upload
 // ---------------------------------------------------------------------
 function uploadFlow() {
-  if (!isConfigured()) { toast('Set up Supabase first — see SETUP.md.', 'bad'); return; }
-  if (!user || !admin) { toast('Sign in as the admin first.', 'bad'); return; }
+  if (!Store.isLocal() && (!user || !admin)) { toast('Sign in as the admin first.', 'bad'); return; }
   const inp = el('input', { type: 'file', accept: '.png,.svg,.glb,.gltf,image/png,image/svg+xml,model/gltf-binary,model/gltf+json', style: 'display:none' });
   inp.onchange = async () => {
     const file = inp.files[0];
@@ -1158,6 +1232,7 @@ async function handleUpload(file) {
     const rec = newRecord(r.slot, r.name.trim(), kind, null);
     const up = await Store.uploadAsset(file, rec.id);
     rec.assetUrl = up.url;
+    if (up.stored) rec.storedUrl = up.stored;   // local art: keep the durable reference
     rec.type = up.kind;
     if (r.mode === 'mirror') rec.mirror = true;
     if (r.mode === 'side') rec.anchor = { ...SIDE_ANCHOR };
@@ -1177,7 +1252,7 @@ async function handleUpload(file) {
 //  Auth
 // ---------------------------------------------------------------------
 async function signInFlow() {
-  if (!isConfigured()) { toast('Set up Supabase first — see SETUP.md.', 'bad'); return; }
+  if (Store.isLocal()) { toast('No sign-in needed — parts are saved on this device.'); return; }
   const r = await ask({
     title: 'Sign in', okText: 'Sign in',
     fields: [
@@ -1187,7 +1262,7 @@ async function signInFlow() {
   });
   if (!r) return;
   try {
-    user = await Store.signInWithPassword(r.email.trim(), r.password);
+    user = await Store.signIn(r.email.trim(), r.password);
     localStorage.setItem('mascot-admin-email', r.email.trim());
     admin = await Store.isAdmin();
     toast(admin ? 'Signed in ✓' : 'Signed in, but not on the admin list.', admin ? 'good' : 'bad');
@@ -1202,16 +1277,16 @@ async function signInFlow() {
 // ---------------------------------------------------------------------
 async function reload(announce) {
   const base = builtinRecords(parts);
-  if (isConfigured() && user) {
+  if (Store.isLocal() || user) {
     try {
       records = mergeRecords(base, await Store.listAll());
       if (announce) toast('Library loaded.', 'good');
     } catch (e) {
       records = base;
-      if (announce) toast('Could not load from Supabase: ' + e.message, 'bad');
+      if (announce) toast('Could not load the library: ' + e.message, 'bad');
     }
   } else {
-    // Signed out: still show the built-ins plus anything already published.
+    // Signed out of Supabase: show the built-ins plus whatever is published.
     try {
       const got = await fetchPublished();
       records = mergeRecords(base, got.records);
@@ -1223,6 +1298,7 @@ async function reload(announce) {
 
 // Keep the app's offline cache in step so a publish shows up straight away.
 async function refreshAppCache() {
+  if (Store.isLocal()) return;        // the app reads the same local store directly
   try {
     const got = await fetchPublished();
     if (got.source === 'network') primeCache(got.records);
@@ -1242,10 +1318,8 @@ async function boot() {
   loadFaces(); updateFaceNav();
   renderTabs();
 
-  if (isConfigured()) {
-    try { user = await Store.currentUser(); } catch (_) {}
-    if (user) admin = await Store.isAdmin();
-  }
+  try { user = await Store.currentUser(); } catch (_) {}
+  if (user) admin = await Store.isAdmin();
   await reload(false);
 
   loadTracker().catch(() => {});

@@ -31,8 +31,18 @@ export function restHeaders(extra) {
 }
 
 // Published records only. Returns [] rather than throwing.
+//
+// With no Supabase configured, the parts calibrated on this device are the
+// library. That is the mode the app ships in until the backend is set up.
 export async function fetchPublished() {
-  if (!isConfigured()) return { records: [], source: 'none' };
+  if (!isConfigured()) {
+    try {
+      const local = await import('./local-store.js');
+      return { records: await local.listPublished(), source: 'local' };
+    } catch (e) {
+      return { records: [], source: 'none', error: e };
+    }
+  }
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS);
   try {

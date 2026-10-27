@@ -1,16 +1,37 @@
 # Setting up the admin page
 
-You only do this once. It takes about ten minutes. Nothing here needs any
-programming — it is copy, paste and click.
+## You do not need to do anything yet
 
-When you finish, you will be able to open
-<https://fossmc24.github.io/Macot-Cam/admin.html> on your phone, sign in, and
-upload and calibrate mascot parts without anyone touching the code.
+The admin page works right now, with no setup at all:
 
-**Until you finish this, everything still works.** The app just shows its
-built-in parts and never calls out to the internet for anything extra.
+<https://fossmc24.github.io/Macot-Cam/admin.html>
+
+Open it, tap **Camera**, pick a part and start calibrating. Uploads, drafts and
+publishing all work. There is no sign-in, because there is nothing to sign in
+to — everything is saved **in the browser on that one device**, and the app on
+that same device picks it up straight away.
+
+That is all you need until you are ready for other people to see your parts.
+
+### Two things to know about this mode
+
+1. **Only that device sees it.** Calibrate on your phone and the app on your
+   phone shows it. Your laptop, and everyone else, still sees the built-in
+   parts. Publishing makes a part visible to the app, not to other people.
+2. **Clearing your browser data would wipe it.** So in the admin page, go to
+   **Library → Backup → ⭳ Save a backup file** now and then. That one file
+   holds every calibration *and* every uploaded image or model. **⭱ Restore a
+   backup** puts it back, on any device.
+
+When you want to share for real, do the rest of this page. Nothing you
+calibrate now is wasted — Step 7 sends it all up in one go, with no
+re-calibrating.
 
 ---
+
+## When you are ready to share: Supabase
+
+This part takes about ten minutes, and is copy, paste and click.
 
 ## Why Supabase and not something else
 
@@ -208,8 +229,27 @@ export const SUPABASE_ANON_KEY = 'eyJhbGciOi...the long anon key...';
 2. Sign in with the email and password from Step 3.
 3. You should see the part library, with every built-in part listed and
    **Published** next to it.
+4. Go to **Library → Security check → Run the check**. The first line should be
+   a tick, and so should the four below it. That confirms a stranger holding
+   your public key can read published parts and do nothing else. If anything
+   has a cross, run the script in Step 2 again.
 
-That's it. You can now upload and calibrate.
+## Step 7 — Move the parts you already made
+
+Everything you calibrated before setting Supabase up is still on your device.
+
+1. Open the admin page on **the device you calibrated on** (this matters — the
+   parts are in that browser).
+2. Go to **Library → Backup**.
+3. Tap **⤴ Move this device's parts to Supabase**.
+
+It uploads each piece of artwork and each calibration, keeping whether it was a
+draft or published. Nothing is removed from your device, so if anything fails
+you can simply try again. When it finishes it tells you how many moved.
+
+Do this once per device you calibrated on.
+
+That's it. From here on, publishing makes a part visible to everyone.
 
 ---
 
@@ -228,6 +268,15 @@ without **Auto Confirm User** switched on. Delete the user in
 
 **The app shows no uploaded parts** — a part only appears in the app once you
 press **Publish**. Drafts are visible in the admin page only.
+
+**A part you made on your phone is missing on your laptop** — expected before
+Supabase is set up: parts live in the browser that made them. Either finish the
+Supabase steps, or move it across with **Save a backup file** on one device and
+**Restore a backup** on the other.
+
+**You set up Supabase and your old parts vanished from the library** — they are
+still on the device, the page is just reading the shared library now. Do Step 7
+to send them up.
 
 **You want to start over** — running the script in Step 2 again is safe; it
 does not delete anything you have made.
