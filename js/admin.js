@@ -74,12 +74,13 @@ function toast(msg, kind = '') {
 }
 
 // Browser confirm() is unreliable on iOS, so ask inside the page.
-function ask({ title, body, okText = 'OK', okClass = 'primary', fields = [] }) {
+function ask({ title, body, okText = 'OK', okClass = 'primary', fields = [], extra = null }) {
   return new Promise(res => {
     const inputs = {};
     const card = el('div', { class: 'card' },
       el('h2', { text: title }),
       body ? el('p', { class: 'small muted', text: body }) : null,
+      extra,
       ...fields.map(f => {
         const input = f.options
           ? el('select', {}, ...f.options.map(o => el('option', { value: o.value, text: o.label, selected: o.value === f.value })))
@@ -1087,6 +1088,40 @@ function uploadFlow() {
   inp.click();
 }
 
+// A look at the file before it goes anywhere. Flat art is shown on a
+// chequerboard so a missing transparent background is obvious.
+async function filePreview(file, kind) {
+  const box = el('div', {
+    style: 'border:1px solid var(--line);border-radius:10px;padding:8px;display:grid;place-items:center;min-height:120px;'
+      + 'background-color:#1a1f28;background-image:linear-gradient(45deg,#232936 25%,transparent 25%,transparent 75%,#232936 75%),'
+      + 'linear-gradient(45deg,#232936 25%,transparent 25%,transparent 75%,#232936 75%);'
+      + 'background-size:16px 16px;background-position:0 0,8px 8px;'
+  });
+  if (kind === 'glb') {
+    box.append(el('p', { class: 'tiny muted', style: 'text-align:center',
+      text: '3D model — you will see it on your face as soon as it uploads.' }));
+    return box;
+  }
+  try {
+    let url;
+    if (kind === 'svg') {
+      url = URL.createObjectURL(new Blob([Store.sanitizeSvg(await file.text())], { type: 'image/svg+xml' }));
+    } else {
+      url = URL.createObjectURL(file);
+    }
+    const img = el('img', { src: url, style: 'max-width:100%;max-height:180px;display:block' });
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      box.append(el('p', { class: 'tiny muted', text: img.naturalWidth + ' × ' + img.naturalHeight + ' px' }));
+    };
+    img.onerror = () => box.append(el('p', { class: 'tiny', style: 'color:var(--danger)', text: 'Could not read that image.' }));
+    box.append(img);
+  } catch (e) {
+    box.append(el('p', { class: 'tiny', style: 'color:var(--danger)', text: e.message }));
+  }
+  return box;
+}
+
 async function handleUpload(file) {
   const kind = Store.assetKind(file);
   if (!kind) { toast('Use a PNG, SVG, GLB or GLTF file.', 'bad'); return; }
@@ -1105,6 +1140,7 @@ async function handleUpload(file) {
     title: 'Add "' + file.name + '"',
     body: `${kind.toUpperCase()} · ${mb} MB`,
     okText: 'Upload',
+    extra: await filePreview(file, kind),
     fields: [
       { key: 'name', label: 'Name shown to users', value: file.name.replace(/\.[^.]+$/, '').slice(0, 30) },
       { key: 'slot', label: 'Which tab it belongs in', options: SLOTS.map(s => ({ value: s.key, label: s.label })), value: 'head' },
