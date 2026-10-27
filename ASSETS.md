@@ -65,6 +65,17 @@ that must turn — a snout, a hat with a real brim — use a GLB.
 - Bake textures into the file (GLB does this for you). A GLTF pointing at
   separate texture files will lose them.
 
+### Why the origin matters more than the size
+
+The admin page has a **Fit it to my head** button that measures your model's
+bounding box and sizes it to the face on screen. It works much better when the
+origin is at the attachment point, because that is what it rests on the head.
+
+Scale is set per axis — a uniform **Scale** plus **Wider / Taller / Deeper** —
+so a ring can be widened to clear a head without its band growing taller. Model
+the part at natural proportions and let calibration stretch it; do not
+pre-distort it.
+
 ### Letting the user colour it
 
 Name a material exactly **`Colorable`** (any capitalisation) and that material
