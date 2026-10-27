@@ -181,6 +181,8 @@
     padding: 10px; margin: 0; -webkit-user-select: text; user-select: text;
   }
   #fatal ol { margin: 0; padding-left: 1.3em; display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+  #fatal code { background: #0a0e14; border-radius: 4px; padding: 1px 5px; font-size: 13px; }
+  #fatal p { max-width: none; }
 </style>
 </head>
 <body>
@@ -204,18 +206,44 @@
       '<p style="font-size:12px;opacity:.7">' + navigator.userAgent + '</p>';
     document.body.appendChild(d);
   };
+  // Opened by double-clicking the file? Browsers refuse to load ES modules
+  // over file://, so say so plainly instead of reporting a mystery failure.
+  window.__isFile = location.protocol === 'file:';
+  window.__fileHelp = function () {
+    if (document.getElementById('fatal')) return;
+    var d = document.createElement('div');
+    d.id = 'fatal';
+    d.innerHTML =
+      '<h2>Open this from a web address, not from a file</h2>' +
+      '<p>This page is open as <code>file://</code>, and browsers will not load the app’s' +
+      ' code that way. Nothing is broken — it just needs a real address.</p>' +
+      '<p><b>Easiest:</b> use the published page.</p>' +
+      '<ol><li><a href="https://fossmc24.github.io/Macot-Cam/admin.html"' +
+      ' style="color:var(--accent)">fossmc24.github.io/Macot-Cam/admin.html</a></li></ol>' +
+      '<p><b>Or run it from this folder</b>, to try changes before publishing them.' +
+      ' In a terminal, in the folder holding this file:</p>' +
+      '<pre>npx serve .</pre>' +
+      '<p>then open the <code>http://localhost:…</code> address it prints. ' +
+      'If you have Python instead: <code>python -m http.server 8000</code>, ' +
+      'then <code>http://localhost:8000/admin.html</code>.</p>';
+    document.body.appendChild(d);
+  };
+  if (window.__isFile) window.__fileHelp();
+
   window.addEventListener('error', function (e) {
+    if (window.__isFile) return window.__fileHelp();
     // A failed <script>/<img> load reports as an event with no .error.
     if (e.error) window.__fatal('Something went wrong', e.error.stack || e.error.message);
     else if (e.target && e.target.src) window.__fatal('A file could not be loaded', e.target.src);
   }, true);
   window.addEventListener('unhandledrejection', function (e) {
+    if (window.__isFile) return window.__fileHelp();
     var r = e.reason;
     window.__fatal('Something went wrong', (r && (r.stack || r.message)) || String(r));
   });
   // If nothing has started after a while, say so rather than sit blank.
   setTimeout(function () {
-    if (!window.__admin) {
+    if (!window.__admin && !window.__isFile) {
       window.__fatal('The page did not finish loading',
         'The scripts did not start within 15 seconds. This is usually a slow or blocked connection, ' +
         'or an old copy held in the browser cache.');

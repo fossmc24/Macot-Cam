@@ -151,6 +151,27 @@
 </style>
 </head>
 <body>
+<!-- Plain script on purpose: it still runs when the module below cannot. -->
+<script>
+  // The app's code is split across js/*.js, and browsers refuse to load ES
+  // modules over file://. Opened by double-clicking, say so rather than
+  // leaving a start button that quietly does nothing.
+  if (location.protocol === 'file:') {
+    document.addEventListener('DOMContentLoaded', function () {
+      var s = document.getElementById('start');
+      if (!s) return;
+      s.innerHTML =
+        '<h1>Open this from a web address</h1>' +
+        '<p>This page is open as a file on disk, and browsers will not load the' +
+        ' app’s code that way.</p>' +
+        '<p><a href="https://fossmc24.github.io/Macot-Cam/" style="color:var(--accent)">' +
+        'Open fossmc24.github.io/Macot-Cam</a></p>' +
+        '<p style="font-size:13px">Or, to run this copy: <br><code>npx serve .</code><br>' +
+        'in this folder, then open the http://localhost address it prints.</p>';
+    });
+  }
+</script>
+
   <video id="cam" playsinline autoplay muted></video>
   <canvas id="out" hidden></canvas>
 
@@ -159,7 +180,7 @@
     <p>Build your own mascot face. Tap the button, then tap “Allow” when your phone asks to use the camera.</p>
     <button id="go">Turn on camera</button>
     <p class="error" id="err" hidden></p>
-    <p class="ver">Version 13</p>
+    <p class="ver">Version 14</p>
   </div>
 
   <div class="help" id="help" hidden>

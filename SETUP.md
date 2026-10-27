@@ -13,6 +13,28 @@ that same device picks it up straight away.
 
 That is all you need until you are ready for other people to see your parts.
 
+### Opening it on your own computer
+
+**Double-clicking `admin.html` will not work**, and it is not broken when it
+refuses — browsers will not load the app's code from a file on disk, only from
+a web address. The page tells you this if you try.
+
+Use the published link above, or serve the folder. In a terminal, in the folder
+holding `index.html`:
+
+```bash
+npx serve .
+```
+
+Then open the `http://localhost:…` address it prints. If you have Python
+instead:
+
+```bash
+python -m http.server 8000
+```
+
+and open `http://localhost:8000/admin.html`.
+
 ### Two things to know about this mode
 
 1. **Only that device sees it.** Calibrate on your phone and the app on your
