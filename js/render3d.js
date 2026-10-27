@@ -12,6 +12,13 @@
 import { forEachInstance, resolveTransform } from './placement.js';
 import { buildParts3D } from './parts-builtin.js';
 
+// Shape of the invisible head used to hide parts that go behind it.
+// Half-extents: width and depth in face widths, height as a multiple of the
+// chin→hairline distance (the skull continues above the hairline, so this is
+// more than half of it). Narrow enough that ears mounted at the sides still
+// show; tall enough to cover the top of the head.
+export const HEAD = { width: .45, depth: .46, height: .74, back: .10 };
+
 export let T = null;            // three.js, once loaded
 let GLTFLoader = null, loader = null;
 
@@ -174,12 +181,25 @@ export function render3D(layer, view, f, mirror) {
   for (const [key, o] of layer.objs) if (!used.has(key)) { scene.remove(o.outer); dispose3D(o.outer); layer.objs.delete(key); }
   if (!used.size) return false;
 
-  const a = view.pts[234], b = view.pts[454];
-  const center = new T.Vector3((a.x + b.x) / 2, -(a.y + b.y) / 2, -((a.z || 0) + (b.z || 0)) / 2)
-    .add(new T.Vector3(0, 0, -1).applyQuaternion(q).multiplyScalar(S * .25));
+  // The invisible head shape, fitted to the whole skull rather than just the
+  // face. It used to be a small sphere centred at ear level, whose top barely
+  // reached the forehead — so a crown or a hat brim that should pass BEHIND
+  // the head was never hidden, and drew straight across it.
+  //
+  // The tracker gives no point for the crown of the skull (landmark 10 is the
+  // hairline), so the head is built from the chin up: its height comes from
+  // chin → hairline, extended to allow for the skull above.
+  const P = i => new T.Vector3(view.pts[i].x, -view.pts[i].y, -(view.pts[i].z || 0));
+  const chin = P(152), brow = P(10);
+  const up = brow.clone().sub(chin);
+  const faceH = up.length() || S;
+  up.normalize();
+  const halfH = faceH * HEAD.height;              // chin → top of the skull, halved
+  const center = chin.clone().addScaledVector(up, halfH)
+    .add(new T.Vector3(0, 0, -1).applyQuaternion(q).multiplyScalar(S * HEAD.back));
   layer.occluder.position.copy(center);
   layer.occluder.quaternion.copy(q);
-  layer.occluder.scale.set(S * .42, S * .56, S * .42);
+  layer.occluder.scale.set(S * HEAD.width, halfH, S * HEAD.depth);
 
   renderer.render(scene, camera);
   return true;

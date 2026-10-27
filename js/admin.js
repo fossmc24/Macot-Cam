@@ -107,12 +107,30 @@ function ask({ title, body, okText = 'OK', okClass = 'primary', fields = [], ext
 }
 
 // label + slider + number box + nudge buttons, all in face units.
-function numRow(label, get, set, { min = -1, max = 1, step = .005, nudge = .005, digits = 3 } = {}) {
-  const range = el('input', { type: 'range', min, max, step, value: get() });
+//
+// min/max only size the SLIDER. If a value lands outside it — typed in, or
+// nudged past the end — the slider widens to take it rather than refusing.
+// A part that needs to sit a long way back should never be stopped by where
+// a slider happens to end; hardMin/hardMax are the only real limits.
+function numRow(label, get, set, {
+  min = -1, max = 1, step = .005, nudge = .005, digits = 3,
+  hardMin = -Infinity, hardMax = Infinity
+} = {}) {
+  let lo = min, hi = max;
+  const range = el('input', { type: 'range', min: lo, max: hi, step, value: get() });
   const box = el('input', { type: 'number', step, value: (+get()).toFixed(digits) });
+
+  const fit = n => {
+    // Grow in halves so the slider keeps a round, stable span.
+    if (n < lo) { lo = Math.min(Math.floor(n * 2) / 2, lo); range.min = lo; }
+    if (n > hi) { hi = Math.max(Math.ceil(n * 2) / 2, hi); range.max = hi; }
+  };
   const push = v => {
-    const n = clamp(+v, min, max);
-    set(isFinite(n) ? n : 0);
+    let n = +v;
+    if (!isFinite(n)) n = +get() || 0;
+    n = clamp(n, hardMin, hardMax);
+    fit(n);
+    set(n);
     range.value = n; box.value = n.toFixed(digits);
     markDirty();
   };
@@ -127,7 +145,7 @@ function numRow(label, get, set, { min = -1, max = 1, step = .005, nudge = .005,
       el('button', { class: 'nudge', text: '+', onclick: () => push(+get() + nudge), 'aria-label': label + ' bigger' })
     )
   );
-  row.refresh = () => { range.value = get(); box.value = (+get()).toFixed(digits); };
+  row.refresh = () => { const n = +get(); fit(n); range.value = n; box.value = n.toFixed(digits); };
   return row;
 }
 
@@ -385,9 +403,9 @@ canvas.addEventListener('pointermove', e => {
   if (pinch && pointers.size >= 2) {
     const [a, b] = [...pointers.values()];
     const ratio = dist(a, b) / pinch.d;
-    if (stageMode === 'hit') current.hit.r = clamp(pinch.hitR * ratio, .02, 2);
+    if (stageMode === 'hit') current.hit.r = clamp(pinch.hitR * ratio, .02, 8);
     else {
-      current.scale = clamp(pinch.scale * ratio, .05, 4);
+      current.scale = clamp(pinch.scale * ratio, .01, 30);
       // Two-finger twist rotates the part.
       current.rotation.z = pinch.rot + (Math.atan2(b.y - a.y, b.x - a.x) - pinch.angle);
     }
@@ -414,8 +432,8 @@ canvas.addEventListener('wheel', e => {
   if (!current) return;
   e.preventDefault();
   const k = e.deltaY < 0 ? 1.05 : 1 / 1.05;
-  if (stageMode === 'hit') current.hit.r = clamp(current.hit.r * k, .02, 2);
-  else current.scale = clamp(current.scale * k, .05, 4);
+  if (stageMode === 'hit') current.hit.r = clamp(current.hit.r * k, .02, 8);
+  else current.scale = clamp(current.scale * k, .01, 30);
   markDirty(); refreshPlaceRows();
 }, { passive: false });
 
@@ -717,31 +735,46 @@ function panePlace() {
   ));
 
   const off = el('div', { class: 'group' }, el('h3', { text: 'Offset (face units)' }));
-  for (const ax of ['x', 'y', 'z']) {
-    const r = numRow(ax.toUpperCase(), () => current.offset[ax], v => current.offset[ax] = v, { min: -1.5, max: 1.5 });
+  for (const ax of ['x', 'y']) {
+    const r = numRow(ax.toUpperCase(), () => current.offset[ax], v => current.offset[ax] = v,
+      { min: -1.5, max: 1.5, hardMin: -10, hardMax: 10 });
     placeRows.push(r); off.append(r);
   }
+  // Depth needs a lot more room than side-to-side: pushing a hat or a crown
+  // back far enough to sit AROUND the head is several face widths.
+  const rz = numRow('Z (depth)', () => current.offset.z, v => current.offset.z = v,
+    { min: -4, max: 4, nudge: .02, hardMin: -20, hardMax: 20 });
+  placeRows.push(rz); off.append(rz);
+  off.append(el('p', { class: 'tiny muted', text:
+    'Z moves a part towards or away from the camera, so it only affects 3D parts. '
+    + 'More negative pushes it back behind your face — that is what makes a crown or a hat sit around your head instead of through it. '
+    + 'The hidden head shape then covers whatever goes behind it.' }));
   pane.append(off);
 
   const sc = el('div', { class: 'group' }, el('h3', { text: 'Size and turn' }));
-  const sr = numRow('Scale', () => current.scale, v => current.scale = v, { min: .05, max: 4, step: .01, nudge: .01, digits: 2 });
+  const sr = numRow('Scale', () => current.scale, v => current.scale = v,
+    { min: .05, max: 4, step: .01, nudge: .01, digits: 2, hardMin: .01, hardMax: 30 });
   placeRows.push(sr); sc.append(sr);
   for (const ax of ['x', 'y', 'z']) {
     const r = numRow('Rotate ' + ax.toUpperCase(), () => current.rotation[ax], v => current.rotation[ax] = v,
-      { min: -Math.PI, max: Math.PI, step: .01, nudge: .02, digits: 2 });
+      { min: -Math.PI, max: Math.PI, step: .01, nudge: .02, digits: 2, hardMin: -12, hardMax: 12 });
     placeRows.push(r); sc.append(r);
   }
   pane.append(sc);
 
   const pv = el('div', { class: 'group' }, el('h3', { text: 'Pivot (flat art only)' }));
   for (const ax of ['x', 'y']) {
-    const r = numRow('Pivot ' + ax.toUpperCase(), () => current.pivot[ax], v => current.pivot[ax] = v, { min: -1, max: 1 });
+    const r = numRow('Pivot ' + ax.toUpperCase(), () => current.pivot[ax], v => current.pivot[ax] = v,
+      { min: -1, max: 1, hardMin: -5, hardMax: 5 });
     placeRows.push(r); pv.append(r);
   }
   pane.append(pv);
 
   const hit = el('div', { class: 'group' }, el('h3', { text: 'Tap area' }));
-  for (const [k, lbl, o] of [['cx', 'Centre X', { min: -1, max: 1 }], ['cy', 'Centre Y', { min: -1, max: 1 }], ['r', 'Radius', { min: .02, max: 1.5 }]]) {
+  for (const [k, lbl, o] of [
+    ['cx', 'Centre X', { min: -1, max: 1, hardMin: -5, hardMax: 5 }],
+    ['cy', 'Centre Y', { min: -1, max: 1, hardMin: -5, hardMax: 5 }],
+    ['r', 'Radius', { min: .02, max: 1.5, hardMin: .02, hardMax: 8 }]]) {
     const r = numRow(lbl, () => current.hit[k], v => current.hit[k] = v, o);
     placeRows.push(r); hit.append(r);
   }
@@ -1353,6 +1386,7 @@ window.__admin = {
   get current() { return current; },
   set current(v) { current = normalizeRecord(v); },
   get faces() { return faces; },
+  get layer() { return layer; },
   selectRecord, buildView, source, infoFor,
   setMode: m => { stageMode = m; },
   get ready() { const s = source(); return !!(s.face && s.face.pts); }
