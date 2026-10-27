@@ -101,7 +101,13 @@
   }
   .tabs button[aria-selected="true"] { background: var(--tile-on); color: var(--fg); }
   .tray { padding-block: 2px; }
+  .tile .badge3d {
+    position: absolute; top: 4px; right: 5px;
+    font-size: 9px; font-weight: 800; letter-spacing: .04em;
+    background: var(--accent); color: #1a1200; border-radius: 4px; padding: 1px 4px;
+  }
   .tile {
+    position: relative;
     flex: none; width: 68px;
     display: flex; flex-direction: column; align-items: center; gap: 4px;
     background: var(--tile); border-radius: 14px; padding: 6px 4px;
@@ -153,7 +159,7 @@
     <p>Build your own mascot face. Tap the button, then tap “Allow” when your phone asks to use the camera.</p>
     <button id="go">Turn on camera</button>
     <p class="error" id="err" hidden></p>
-    <p class="ver">Version 9</p>
+    <p class="ver">Version 10</p>
   </div>
 
   <div class="help" id="help" hidden>
@@ -191,6 +197,12 @@
     <p class="hint">Tap or drag a part onto your face. Tap a part on your face to move it, pinch to resize, drag it down here to remove.</p>
   </div>
 
+<script type="importmap">
+  { "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  } }
+</script>
 <script type="module">
   import { FaceLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
 
@@ -272,8 +284,8 @@
       // "side" ears attach to each side of your face at ear level (one ear per side, drawn
       // pointing outward). hit = tap area for one ear; cy/r frame the pair in the tray picture.
       { id: 'dogEars', name: 'Floppy ears', tip: 'shake your head', color: '#8a5a32', side: true, cy: 0.34, r: 0.8,
-        hit: { cx: .04, cy: .34, r: .34 }, draw(g, s, c, f) {
-        g.save(); g.translate(0, s * .02);                                      // hinge at eye level, where your real ear starts
+        hit: { cx: .04, cy: .27, r: .34 }, draw(g, s, c, f) {
+        g.save(); g.translate(0, -s * .05);                                     // hinge just above eye level, where your real ear starts
         g.rotate(-f.brow * .5 - f.bounce * .4 + f.swing * 1.1 * f.sx);          // swings with your head
         g.beginPath();
         g.moveTo(-s * .05, 0);
@@ -510,11 +522,188 @@
       }}
     ]
   };
+  // =====================================================================
+  //  3D PARTS — real 3D models (lit, shiny, turn with your head), drawn
+  //  with three.js. Units: 1 = face width. +y is up, +z points out of the face.
+  // =====================================================================
+  let T = null, r3 = null;   // three.js + its renderer, once loaded
+  const P3 = {
+    mat(c, o = {}) { return new T.MeshPhysicalMaterial(Object.assign({ color: c, roughness: .35, metalness: 0, clearcoat: .6, clearcoatRoughness: .2, side: T.DoubleSide }, o)); },
+    mesh(geo, mat, x = 0, y = 0, z = 0) { const m = new T.Mesh(geo, mat); m.position.set(x, y, z); return m; },
+    dark(c, k = .65) { return new T.Color(c).multiplyScalar(k); },
+    light(c, k = .25) { return new T.Color(c).lerp(new T.Color('#ffffff'), k); },
+    // Two mirrored sides; fn(side) builds the right-hand one and returns its moving part.
+    pair(g, fn) { return [-1, 1].map(k => { const side = new T.Group(); side.scale.x = k; g.add(side); return fn(side); }); },
+    roundRect(w, h, r) {
+      const s = new T.Shape(), x = -w / 2, y = -h / 2;
+      s.moveTo(x + r, y); s.lineTo(x + w - r, y); s.quadraticCurveTo(x + w, y, x + w, y + r);
+      s.lineTo(x + w, y + h - r); s.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      s.lineTo(x + r, y + h); s.quadraticCurveTo(x, y + h, x, y + h - r);
+      s.lineTo(x, y + r); s.quadraticCurveTo(x, y, x + r, y);
+      return s;
+    },
+    star(r) {
+      const s = new T.Shape();
+      for (let i = 0; i < 10; i++) { const a = Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * .45 : r; i ? s.lineTo(Math.cos(a) * rr, Math.sin(a) * rr) : s.moveTo(Math.cos(a) * rr, Math.sin(a) * rr); }
+      s.closePath(); return s;
+    }
+  };
+  const swingK = n => (n ? 1 : -1);   // which side a pair() entry is: 0 = left, 1 = right
+
+  const PARTS_3D = {
+    head: [
+      { id: 'cap3d', name: 'Ball cap', color: '#0b3d91', cy: -0.02, r: 0.6, build(c) {
+        const g = new T.Group(), cloth = P3.mat(c, { roughness: .7, clearcoat: .05 });
+        const dome = P3.mesh(new T.SphereGeometry(.56, 48, 24, 0, Math.PI * 2, 0, Math.PI / 2), cloth, 0, -.16, -.32);
+        dome.scale.set(1, .85, 1.05); g.add(dome);
+        const brim = P3.mesh(new T.CylinderGeometry(.48, .48, .03, 48), P3.mat(P3.dark(c), { roughness: .7, clearcoat: .05 }), 0, -.17, -.01);
+        brim.rotation.x = .2; g.add(brim);
+        g.add(P3.mesh(new T.SphereGeometry(.045, 16, 12), P3.mat(P3.dark(c)), 0, .32, -.32));
+        const star = P3.mesh(new T.ExtrudeGeometry(P3.star(.09), { depth: .02, bevelEnabled: true, bevelThickness: .008, bevelSize: .008, bevelSegments: 2 }), P3.mat('#ffffff', { roughness: .4 }), 0, .11, .18);
+        star.rotation.x = -.6; g.add(star);
+        return g;
+      }},
+      { id: 'crown3d', name: 'Crown', color: '#ffb81c', cy: -0.2, r: 0.46, build(c) {
+        const g = new T.Group(), gold = P3.mat(c, { metalness: 1, roughness: .25, clearcoat: 0 });
+        g.add(P3.mesh(new T.CylinderGeometry(.33, .35, .2, 48, 1, true), gold, 0, .1, -.3));
+        for (let i = 0; i < 8; i++) {
+          const a = i / 8 * Math.PI * 2, x = Math.sin(a) * .33, z = -.3 + Math.cos(a) * .33;
+          g.add(P3.mesh(new T.ConeGeometry(.06, .18, 4), gold, x, .29, z));
+          g.add(P3.mesh(new T.SphereGeometry(.028, 12, 8), P3.mat('#ffffff', { roughness: .15 }), x, .39, z));
+        }
+        for (const a of [0, -.7, .7]) g.add(P3.mesh(new T.SphereGeometry(.045, 16, 12), P3.mat('#d0103a', { roughness: .05, clearcoat: 1 }), Math.sin(a) * .36, .1, -.3 + Math.cos(a) * .36));
+        g.rotation.x = -.12;
+        return g;
+      }},
+      { id: 'horns3d', name: 'Horns', color: '#c8102e', cy: -0.28, r: 0.5, build(c) {
+        const g = new T.Group(), m = P3.mat(c, { roughness: .3, clearcoat: .8 });
+        P3.pair(g, side => {
+          const geo = new T.ConeGeometry(.075, .42, 24, 16); geo.translate(0, .21, 0);
+          const p = geo.attributes.position;
+          for (let i = 0; i < p.count; i++) { const t = p.getY(i) / .42; p.setX(i, p.getX(i) + .2 * t * t); p.setZ(i, p.getZ(i) - .06 * t); }
+          geo.computeVertexNormals();
+          const h = P3.mesh(geo, m, .2, 0, -.12); h.rotation.z = -.15; side.add(h);
+          return h;
+        });
+        return g;
+      }}
+    ],
+    ears: [
+      { id: 'bearEars3d', name: 'Bear ears', tip: 'raise your eyebrows', color: '#7a4a24', cy: -0.28, r: 0.62, build(c) {
+        const g = new T.Group(), fur = P3.mat(c, { roughness: .8, clearcoat: 0 }), pink = P3.mat('#e9a8a0', { roughness: .7, clearcoat: 0 });
+        const pivs = P3.pair(g, side => {
+          const piv = new T.Group(); piv.position.set(.4, .24, -.26); side.add(piv);
+          const o = P3.mesh(new T.SphereGeometry(.19, 32, 20), fur); o.scale.z = .5; piv.add(o);
+          const i = P3.mesh(new T.SphereGeometry(.11, 24, 16), pink, 0, 0, .06); i.scale.z = .3; piv.add(i);
+          return piv;
+        });
+        g.userData.update = f => pivs.forEach((p, n) => { p.rotation.z = -Math.sin(f.t * 18) * .3 * f.brow - f.swing * .25 * swingK(n); });
+        return g;
+      }},
+      { id: 'bunnyEars3d', name: 'Bunny ears', tip: 'raise your eyebrows to stand them up', color: '#f2f2f2', cy: -0.55, r: 0.58, build(c) {
+        const g = new T.Group(), fur = P3.mat(c, { roughness: .75, clearcoat: 0 }), pink = P3.mat('#f7a8bd', { roughness: .6, clearcoat: 0 });
+        const pivs = P3.pair(g, side => {
+          const piv = new T.Group(); piv.position.set(.16, .1, -.2); side.add(piv);
+          const o = P3.mesh(new T.SphereGeometry(.1, 32, 24), fur, 0, .43, 0); o.scale.set(1, 4.3, .45); piv.add(o);
+          const i = P3.mesh(new T.SphereGeometry(.055, 24, 16), pink, 0, .42, .03); i.scale.set(1, 3.6, .3); piv.add(i);
+          return piv;
+        });
+        g.userData.update = f => pivs.forEach((p, n) => { p.rotation.z = -(1 - f.brow) * .6 - f.swing * .5 * swingK(n); });
+        return g;
+      }},
+      { id: 'dogEars3d', name: 'Floppy ears', tip: 'shake your head', color: '#8a5a32', side: true, cy: 0.27, r: 0.8, hit: { cx: .04, cy: .27, r: .34 }, build(c) {
+        const g = new T.Group(), piv = new T.Group(); piv.position.set(.03, .05, -.06); g.add(piv);
+        const ear = P3.mesh(new T.SphereGeometry(.14, 32, 24), P3.mat(c, { roughness: .8, clearcoat: 0 }), .03, -.33, 0); ear.scale.set(1, 2.4, .35); piv.add(ear);
+        g.userData.update = f => { piv.rotation.z = f.brow * .5 + f.bounce * .4 - f.swing * 1.1 * f.sx; };
+        return g;
+      }},
+      { id: 'mouseEars3d', name: 'Mouse ears', tip: 'move your head', color: '#1b1b1b', cy: -0.32, r: 0.66, build(c) {
+        const g = new T.Group(), m = P3.mat(c, { roughness: .25, clearcoat: 1 }), inner = P3.mat(P3.light(c), { roughness: .5 });
+        const pivs = P3.pair(g, side => {
+          const piv = new T.Group(); piv.position.set(.4, .3, -.22); side.add(piv);
+          const d = P3.mesh(new T.CylinderGeometry(.24, .24, .07, 48), m); d.rotation.x = Math.PI / 2; piv.add(d);
+          const i = P3.mesh(new T.CylinderGeometry(.15, .15, .02, 40), inner, 0, 0, .04); i.rotation.x = Math.PI / 2; piv.add(i);
+          return piv;
+        });
+        g.userData.update = f => pivs.forEach((p, n) => { p.position.y = .3 + f.bounce * .15; p.scale.set(1 + f.bounce * .2, 1 - f.bounce * .2, 1); p.rotation.z = -f.swing * .3 * swingK(n); });
+        return g;
+      }}
+    ],
+    eyes: [
+      { id: 'shades3d', name: 'Sunglasses', color: '#1b1b1b', cy: 0.02, r: 0.42, build(c) {
+        const g = new T.Group(), lens = P3.mat(c, { roughness: .05, metalness: .3, clearcoat: 1 }), frame = P3.mat(c, { roughness: .3 });
+        const lg = new T.ExtrudeGeometry(P3.roundRect(.3, .18, .06), { depth: .02, bevelEnabled: true, bevelThickness: .012, bevelSize: .012, bevelSegments: 3 }); lg.center();
+        for (const k of [-1, 1]) {
+          g.add(P3.mesh(lg, lens, k * .2, -.02, .1));
+          g.add(P3.mesh(new T.BoxGeometry(.02, .03, .5), frame, k * .36, .03, -.15));
+        }
+        g.add(P3.mesh(new T.BoxGeometry(.12, .03, .03), frame, 0, .04, .1));
+        return g;
+      }},
+      { id: 'glasses3d', name: 'Round glasses', color: '#ffb81c', cy: 0.02, r: 0.42, build(c) {
+        const g = new T.Group(), metal = P3.mat(c, { metalness: 1, roughness: .25, clearcoat: 0 });
+        const glass = P3.mat('#cfe8ff', { transparent: true, opacity: .18, roughness: 0, clearcoat: 1 });
+        for (const k of [-1, 1]) {
+          g.add(P3.mesh(new T.TorusGeometry(.13, .016, 16, 56), metal, k * .2, -.01, .1));
+          g.add(P3.mesh(new T.CircleGeometry(.125, 40), glass, k * .2, -.01, .1));
+          g.add(P3.mesh(new T.BoxGeometry(.015, .02, .5), metal, k * .33, .03, -.15));
+        }
+        g.add(P3.mesh(new T.TorusGeometry(.07, .013, 10, 24, Math.PI), metal, 0, -.01, .1));
+        return g;
+      }}
+    ],
+    nose: [
+      { id: 'clownNose3d', name: 'Clown nose', color: '#e01b24', cy: 0, r: 0.14, build(c) {
+        const g = new T.Group(); g.add(P3.mesh(new T.SphereGeometry(.1, 40, 28), P3.mat(c, { roughness: .15, clearcoat: 1 }), 0, 0, .05)); return g;
+      }},
+      { id: 'bearNose3d', name: 'Bear nose', color: '#2b1a10', cy: 0, r: 0.15, build(c) {
+        const g = new T.Group(), n = P3.mesh(new T.SphereGeometry(.12, 40, 28), P3.mat(c, { roughness: .2, clearcoat: 1 }), 0, 0, .04);
+        n.scale.set(1, .72, .7); g.add(n); return g;
+      }},
+      { id: 'pigSnout3d', name: 'Pig snout', color: '#f4a3b5', cy: 0, r: 0.15, build(c) {
+        const g = new T.Group();
+        const s = P3.mesh(new T.CylinderGeometry(.12, .13, .09, 48), P3.mat(c, { roughness: .45, clearcoat: .4 }), 0, -.01, .05); s.rotation.x = Math.PI / 2; g.add(s);
+        for (const k of [-1, 1]) { const h = P3.mesh(new T.SphereGeometry(.028, 16, 12), P3.mat('#5a2230', { roughness: .6, clearcoat: 0 }), k * .045, -.01, .095); h.scale.set(.8, 1.3, .4); g.add(h); }
+        return g;
+      }}
+    ],
+    mouth: [
+      { id: 'tongue3d', name: 'Crazy tongue', tip: 'open your mouth', color: '#ff5c8a', cy: 0.16, r: 0.22, build(c) {
+        const g = new T.Group(), piv = new T.Group(); piv.position.z = .03; g.add(piv);
+        const t = P3.mesh(new T.CapsuleGeometry(.085, .3, 8, 24), P3.mat(c, { roughness: .35, clearcoat: .7 }), 0, -.235, 0); t.scale.z = .45; piv.add(t);
+        g.userData.update = f => {
+          const L = Math.min(.5, .1 + f.gap * 2.6);
+          piv.position.y = -f.gap / 2; piv.scale.y = L / .47;
+          piv.rotation.z = Math.sin(f.t * 9) * Math.min(.45, f.gap * 3);   // wiggle
+          piv.rotation.x = -.7 * Math.min(1, f.gap * 5);                     // sticks out toward the camera
+        };
+        return g;
+      }},
+      { id: 'bubble3d', name: 'Bubble gum', tip: 'open your mouth', color: '#ff8fc7', cy: 0.12, r: 0.26, build(c) {
+        const g = new T.Group(), b = P3.mesh(new T.SphereGeometry(1, 48, 32), P3.mat(c, { roughness: .12, clearcoat: 1, transparent: true, opacity: .88 }));
+        g.add(b);
+        g.userData.update = f => { const r = Math.min(.55, .05 + f.gap * 2.8); b.scale.setScalar(r); b.position.set(0, -r * .4, .04 + r * .75); };
+        return g;
+      }},
+      { id: 'beak3d', name: 'Beak', tip: 'open your mouth', color: '#f5a623', cy: 0.02, r: 0.26, build(c) {
+        const g = new T.Group(), up = new T.Group(), lo = new T.Group(); lo.position.set(0, -.03, .02); g.add(up, lo);
+        const u = P3.mesh(new T.ConeGeometry(.21, .36, 32), P3.mat(c, { roughness: .35, clearcoat: .6 }), 0, 0, .17); u.rotation.x = Math.PI / 2; u.scale.z = .5; up.add(u);
+        const l = P3.mesh(new T.ConeGeometry(.17, .28, 32), P3.mat(P3.dark(c, .85), { roughness: .4 }), 0, 0, .13); l.rotation.x = Math.PI / 2; l.scale.z = .45; lo.add(l);
+        g.userData.update = f => {
+          up.position.y = f.gap * .35; up.rotation.x = -Math.min(.25, f.gap * 1.2);
+          lo.position.y = -.03 - f.gap * .35; lo.rotation.x = Math.min(.7, f.gap * 4);   // lower beak opens with your mouth
+        };
+        return g;
+      }}
+    ]
+  };
+  for (const [slot, list] of Object.entries(PARTS_3D)) for (const p of list) { p.three = true; PARTS[slot].push(p); }
+
   const findPart = (slot, id) => PARTS[slot].find(p => p.id === id);
   for (const id of ['tongue', 'teeth', 'lips', 'bubble', 'beak', 'fire']) findPart('mouth', id).tip = 'open your mouth';
 
   // Where each slot sits on the face. Cheeks appear twice (mirrored).
-  const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: ((a.z || 0) + (b.z || 0)) / 2 });
   // Listed in drawing order (first = furthest back).
   const SLOTS = [
     { key: 'facial', label: 'Facial hair', anchors: [p => p[13]] },
@@ -540,6 +729,9 @@
     { name: 'Monster', icon: '👹', build: () => ({ head: slotWith('head', 'horns'), mouth: slotWith('mouth', 'fire'), eyes: slotWith('eyes', 'mask') }) },
     { name: 'Bird',  icon: '🐦', build: () => ({ head: slotWith('head', 'crown'), mouth: slotWith('mouth', 'beak'), cheeks: slotWith('cheeks', 'blush') }) },
     { name: 'Goofy', icon: '🤪', build: () => ({ mouth: slotWith('mouth', 'tongue'), nose: slotWith('nose', 'clownNose'), eyes: slotWith('eyes', 'glasses') }) },
+    { name: '3D Bear', icon: '🧸', build: () => ({ ears: slotWith('ears', 'bearEars3d'), nose: slotWith('nose', 'bearNose3d'), mouth: slotWith('mouth', 'tongue3d') }) },
+    { name: '3D Star', icon: '⭐', build: () => ({ head: slotWith('head', 'crown3d'), eyes: slotWith('eyes', 'shades3d'), mouth: slotWith('mouth', 'bubble3d') }) },
+    { name: '3D Piggy', icon: '🐷', build: () => ({ ears: slotWith('ears', 'mouseEars3d', '#f4a3b5'), nose: slotWith('nose', 'pigSnout3d'), cheeks: slotWith('cheeks', 'blush') }) },
     { name: 'Blank', icon: '⬜', build: () => ({}) }
   ];
   function presetState(i) {
@@ -698,10 +890,11 @@
         const res = landmarker.detectForVideo(video, performance.now());
         const face = res.faceLandmarks && res.faceLandmarks[0];
         if (face) {
-          const fresh = face.map(q => ({ x: (mirror ? 1 - q.x : q.x) * w, y: q.y * h }));
+          // z = depth (smaller = closer to the camera), same scale as x.
+          const fresh = face.map(q => ({ x: (mirror ? 1 - q.x : q.x) * w, y: q.y * h, z: q.z * w }));
           // Light smoothing so parts don't jitter.
           pts = pts && pts.length === fresh.length
-            ? fresh.map((q, i) => ({ x: pts[i].x + (q.x - pts[i].x) * .65, y: pts[i].y + (q.y - pts[i].y) * .65 }))
+            ? fresh.map((q, i) => ({ x: pts[i].x + (q.x - pts[i].x) * .65, y: pts[i].y + (q.y - pts[i].y) * .65, z: pts[i].z + (q.z - pts[i].z) * .65 }))
             : fresh;
           faceM = measure(pts);
           readExpressions(res.faceBlendshapes && res.faceBlendshapes[0]);
@@ -715,7 +908,9 @@
 
       if (pts && faceM) {
         if (showDots) drawDots();
-        drawMascot();
+        const fi = faceInfo();
+        drawMascot(fi);
+        if (r3 && render3D(fi)) ctx.drawImage(r3.renderer.domElement, 0, 0);
         roarIfMouthOpen();
         if (editing && selected) drawSelection();
       }
@@ -752,9 +947,9 @@
     g.scale(st.scale, st.scale);
   }
 
-  function drawMascot() {
-    const f = faceInfo();
+  function drawMascot(f) {
     eachInstance((slot, st, part, anchor, inst, sx) => {
+      if (part.three) return;          // 3D parts are drawn by render3D()
       ctx.save();
       applyTransform(ctx, anchor, sx, st);
       f.sx = sx;
@@ -805,6 +1000,132 @@
   // =====================================================================
   //  EDITING ON THE FACE — tap to select, drag to move, pinch to resize
   // =====================================================================
+  // ---------- 3D renderer ----------
+  async function init3D() {
+    try {
+      T = await import('three');
+      const { RoomEnvironment } = await import('three/addons/environments/RoomEnvironment.js');
+      const make = (w, h) => {
+        const renderer = new T.WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
+        renderer.setPixelRatio(1); renderer.setSize(w, h, false); renderer.setClearColor(0x000000, 0);
+        renderer.toneMapping = T.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
+        const scene = new T.Scene();
+        // A soft "studio" around the parts gives them realistic shine and reflections.
+        scene.environment = new T.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), .04).texture;
+        scene.add(new T.HemisphereLight(0xffffff, 0x445566, .5));
+        const sun = new T.DirectionalLight(0xffffff, 1.4); sun.position.set(.4, 1, 1.2); scene.add(sun);
+        return { renderer, scene };
+      };
+      const main = make(16, 16);
+      main.camera = new T.OrthographicCamera(0, 16, 0, -16, -5000, 5000);   // 1 unit = 1 camera pixel
+      // An invisible head shape: hides 3D parts when they swing behind your head (like an ear when you turn).
+      main.occluder = new T.Mesh(new T.SphereGeometry(1, 32, 24), new T.MeshBasicMaterial({ colorWrite: false }));
+      main.occluder.renderOrder = -1;
+      main.scene.add(main.occluder);
+      main.objs = new Map();
+      main.thumb = make(120, 120);
+      main.thumb.camera = new T.OrthographicCamera(-1, 1, 1, -1, -10, 10);
+      r3 = main;
+      thumbCache.clear();
+      if (editing) renderTray();
+    } catch (e) {
+      console.warn('3D parts unavailable:', e);
+      T = null; r3 = null;
+    }
+  }
+
+  // Which way your head is facing, worked out from the 3D face points.
+  function headRotation() {
+    const P = i => new T.Vector3(pts[i].x, -pts[i].y, -(pts[i].z || 0));
+    const X = P(263).sub(P(33)); if (facing === 'user') X.negate(); X.normalize();   // left → right across the eyes
+    const Y = P(10).sub(P(152)); Y.addScaledVector(X, -X.dot(Y)).normalize();       // chin → forehead
+    const Z = new T.Vector3().crossVectors(X, Y);                                    // out of the face
+    return new T.Quaternion().setFromRotationMatrix(new T.Matrix4().makeBasis(X, Y, Z));
+  }
+
+  function dispose3D(obj) { obj.traverse(n => { if (n.geometry) n.geometry.dispose(); if (n.material) n.material.dispose(); }); }
+
+  // Place and draw every 3D part. Returns false if there were none (nothing to copy).
+  function render3D(f) {
+    const { renderer, scene, camera } = r3, w = canvas.width, h = canvas.height;
+    if (renderer.domElement.width !== w || renderer.domElement.height !== h) {
+      renderer.setSize(w, h, false); camera.right = w; camera.bottom = -h; camera.updateProjectionMatrix();
+    }
+    const q = headRotation(), S = faceM.size, used = new Set();
+    eachInstance((slot, st, part, anchor, inst, sx) => {
+      if (!part.three) return;
+      const key = slot.key + ':' + inst, color = st.color || part.color, sig = part.id + '|' + color;
+      let o = r3.objs.get(key);
+      if (!o || o.sig !== sig) {
+        if (o) { scene.remove(o.outer); dispose3D(o.outer); }
+        const outer = new T.Group(), inner = new T.Group(), model = part.build(color);
+        inner.add(model); outer.add(inner); scene.add(outer);
+        o = { sig, outer, inner, model };
+        r3.objs.set(key, o);
+      }
+      used.add(key);
+      o.outer.position.set(anchor.x, -anchor.y, -(anchor.z || 0));   // stuck to the face point
+      o.outer.quaternion.copy(q);                                     // turned with your head
+      o.outer.scale.set(S * sx, S, S);                                // sized to your face (mirrored for the left side)
+      o.inner.position.set(st.dx, -st.dy, 0);                         // your drag adjustments
+      o.inner.scale.setScalar(st.scale);                              // your pinch adjustments
+      f.sx = sx;
+      if (o.model.userData.update) o.model.userData.update(f);
+    });
+    for (const [key, o] of r3.objs) if (!used.has(key)) { scene.remove(o.outer); dispose3D(o.outer); r3.objs.delete(key); }
+    if (!used.size) return false;
+
+    const a = pts[234], b = pts[454];
+    const center = new T.Vector3((a.x + b.x) / 2, -(a.y + b.y) / 2, -((a.z || 0) + (b.z || 0)) / 2)
+      .add(new T.Vector3(0, 0, -1).applyQuaternion(q).multiplyScalar(S * .25));
+    r3.occluder.position.copy(center);
+    r3.occluder.quaternion.copy(q);
+    r3.occluder.scale.set(S * .42, S * .56, S * .42);
+
+    renderer.render(scene, camera);
+    return true;
+  }
+
+  // Tray pictures for 3D parts: a little 3/4-view render so you can see they're 3D.
+  const thumbCache = new Map();
+  function thumb3D(part, color) {
+    const d = Math.min(3, window.devicePixelRatio || 1), size = Math.round(60 * d);
+    const out = document.createElement('canvas'); out.width = out.height = size;
+    const g2 = out.getContext('2d');
+    if (!r3) {
+      g2.fillStyle = 'rgba(255,255,255,.55)'; g2.font = `700 ${13 * d}px system-ui, sans-serif`;
+      g2.textAlign = 'center'; g2.textBaseline = 'middle'; g2.fillText('3D…', size / 2, size / 2);
+      return out;
+    }
+    const key = part.id + '|' + color;
+    if (!thumbCache.has(key)) {
+      const { renderer, scene, camera } = r3.thumb;
+      const holder = new T.Group();
+      const f = { gap: .12, w: .38, t: 0, brow: .6, blink: 0, swing: 0, bounce: 0, sx: 1 };
+      const add = (sx, x) => {
+        const wrap = new T.Group(), m = part.build(color);
+        wrap.position.x = x; wrap.scale.x = sx; wrap.add(m);
+        if (m.userData.update) m.userData.update(f);
+        holder.add(wrap);
+      };
+      if (part.side) { add(-1, -.5); add(1, .5); } else add(1, 0);
+      holder.rotation.set(.15, -.5, 0);
+      scene.add(holder); holder.updateMatrixWorld(true);
+      const box = new T.Box3().setFromObject(holder), c = box.getCenter(new T.Vector3()), sz = box.getSize(new T.Vector3());
+      const half = Math.max(sz.x, sz.y) * .58;
+      camera.left = c.x - half; camera.right = c.x + half; camera.top = c.y + half; camera.bottom = c.y - half;
+      camera.updateProjectionMatrix();
+      renderer.setSize(size, size, false);
+      renderer.render(scene, camera);
+      const img = document.createElement('canvas'); img.width = img.height = size;
+      img.getContext('2d').drawImage(renderer.domElement, 0, 0);
+      thumbCache.set(key, img);
+      scene.remove(holder); dispose3D(holder);
+    }
+    g2.drawImage(thumbCache.get(key), 0, 0);
+    return out;
+  }
+
   let selected = null;   // { slot, inst }
   const pointers = new Map();
   let drag = null, pinch = null;
@@ -906,14 +1227,15 @@
   }
 
   function thumb(slotKey, part) {
+    const st = mascot[slotKey];
+    const col = st.part === part.id && st.color ? st.color : part.color;
+    if (part.three) return thumb3D(part, col);
     const d = Math.min(3, window.devicePixelRatio || 1);
     const c = document.createElement('canvas');
     c.width = c.height = 60 * d;
     const g = c.getContext('2d');
     const s = (c.width * .44) / part.r;
     g.translate(c.width / 2, c.height / 2 - part.cy * s);
-    const st = mascot[slotKey];
-    const col = st.part === part.id && st.color ? st.color : part.color;
     const f = Object.assign({ gap: .1, w: .38, t: 0, brow: .5, blink: 0, swing: 0, bounce: 0, sx: 1 }, part.thumbF);
     if (part.side) {
       // Side ears draw one ear at a time; show a pair either side of an imaginary face.
@@ -944,11 +1266,13 @@
     none.onclick = () => { mascot[slotKey] = blankSlot(); selected = null; save(); renderTray(); updateSelbar(); };
     tray.appendChild(none);
 
-    for (const part of PARTS[slotKey]) {
+    // 3D parts first, then the flat ones.
+    for (const part of [...PARTS[slotKey]].sort((a, b) => (b.three ? 1 : 0) - (a.three ? 1 : 0))) {
       const t = document.createElement('div');
       t.className = 'tile' + (mascot[slotKey].part === part.id ? ' on' : '');
       t.tabIndex = 0;
       t.setAttribute('role', 'button');
+      if (part.three) { const b = document.createElement('span'); b.className = 'badge3d'; b.textContent = '3D'; t.appendChild(b); }
       t.appendChild(thumb(slotKey, part));
       t.appendChild(document.createTextNode(part.name));
       makeDraggable(t, slotKey, part);
@@ -1093,6 +1417,7 @@
   };
 
   loadTracker().catch(() => {});
+  init3D();
 </script>
 </body>
 </html>
