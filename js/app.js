@@ -443,6 +443,7 @@ async function boot() {
   // Calibration records first, so the saved mascot can be checked against them.
   const got = await loadRecords(parts);
   records = got.records;
+  const remote = got.remote;      // reused below, so we only fetch once
   preloadImages(Object.values(records));
   mascot = presetState(0);
   try { adoptSaved(JSON.parse(localStorage.getItem('mascot-v1') || 'null')); } catch (_) {}
@@ -454,8 +455,7 @@ async function boot() {
   try {
     layer = await createLayer();
     parts = makeParts(layer.parts3D);
-    const re = await loadRecords(parts);
-    records = re.records;
+    records = (await loadRecords(parts, remote)).records;
     clearThumbCache();
     if (editing) renderTray();
   } catch (e) {
@@ -470,6 +470,7 @@ window.__mascot = {
   get parts() { return parts; },
   get mascot() { return mascot; },
   get face() { return face; },
+  get layer() { return layer; },
   set mascot(v) { mascot = v; save(); if (editing) { renderTray(); updateSelbar(); } },
   equip, presetState, openCamera,
   get ready() { return !!(face.pts && face.faceM); }

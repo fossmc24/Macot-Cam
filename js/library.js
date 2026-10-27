@@ -28,15 +28,19 @@ export function makeParts(parts3D) {
 }
 
 // The data side. Never throws: a backend problem just means built-ins only.
-export async function loadRecords(parts) {
+//
+// Pass `remote` to re-merge records you already fetched — the app does this
+// once three.js has added the 3D parts, so startup only ever hits the
+// network once.
+export async function loadRecords(parts, remote) {
   const base = builtinRecords(parts);
-  let source = 'none', error = null;
+  if (remote) return { records: mergeRecords(base, remote.records), source: remote.source, error: remote.error || null, remote };
   try {
     const got = await fetchPublished();
-    source = got.source; error = got.error || null;
-    return { records: mergeRecords(base, got.records), source, error };
+    return { records: mergeRecords(base, got.records), source: got.source, error: got.error || null, remote: got };
   } catch (e) {
-    return { records: base, source: 'offline', error: e };
+    const empty = { records: [], source: 'offline', error: e };
+    return { records: base, source: 'offline', error: e, remote: empty };
   }
 }
 

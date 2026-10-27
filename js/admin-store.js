@@ -140,6 +140,71 @@ export function sanitizeSvg(text) {
   return new XMLSerializer().serializeToString(doc);
 }
 
+// ---------------------------------------------------------------------
+//  Security self-check
+//
+//  Asks the question an attacker would: with nothing but the public anon
+//  key, can I read drafts, or write anything? Runs with plain fetch so the
+//  signed-in session is NOT used — this is what a stranger can do.
+// ---------------------------------------------------------------------
+export async function securityCheck() {
+  const anon = { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY };
+  const base = `${SUPABASE_URL}/rest/v1`;
+  const out = [];
+  const add = (name, pass, detail) => out.push({ name, pass, detail });
+  const testId = '__security_check__';
+
+  // 1. Published parts must be readable by anyone — the app depends on it.
+  try {
+    const r = await fetch(`${base}/${PARTS_TABLE}?select=id&published=is.true&limit=1`, { headers: anon });
+    add('Anyone can read published parts', r.ok, r.ok ? 'HTTP ' + r.status : 'HTTP ' + r.status + ' — the app will fall back to built-ins');
+  } catch (e) { add('Anyone can read published parts', false, String(e)); }
+
+  // 2. Drafts must NOT be readable without being an admin.
+  try {
+    const r = await fetch(`${base}/${PARTS_TABLE}?select=id&published=is.false&limit=5`, { headers: anon });
+    const rows = r.ok ? await r.json() : [];
+    add('Drafts are hidden from the public', r.ok && rows.length === 0,
+      r.ok ? (rows.length ? rows.length + ' draft(s) leaked!' : 'none visible') : 'HTTP ' + r.status);
+  } catch (e) { add('Drafts are hidden from the public', false, String(e)); }
+
+  // 3. Inserting must be refused.
+  let inserted = false;
+  try {
+    const r = await fetch(`${base}/${PARTS_TABLE}`, {
+      method: 'POST',
+      headers: { ...anon, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify({ id: testId, name: 'security check', slot: 'head', type: 'builtin', record: {}, published: false })
+    });
+    inserted = r.ok;
+    add('Strangers cannot add parts', !r.ok, r.ok ? 'ALLOWED — this is wrong' : 'refused with HTTP ' + r.status);
+  } catch (e) { add('Strangers cannot add parts', true, 'refused (' + e.message + ')'); }
+
+  // 4. Updating an existing row must be refused.
+  try {
+    const r = await fetch(`${base}/${PARTS_TABLE}?id=neq.${testId}`, {
+      method: 'PATCH',
+      headers: { ...anon, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify({ name: 'hacked' })
+    });
+    add('Strangers cannot change parts', !r.ok, r.ok ? 'ALLOWED — this is wrong' : 'refused with HTTP ' + r.status);
+  } catch (e) { add('Strangers cannot change parts', true, 'refused (' + e.message + ')'); }
+
+  // 5. Uploading a file must be refused.
+  try {
+    const r = await fetch(`${SUPABASE_URL}/storage/v1/object/${ASSET_BUCKET}/__security_check__.txt`, {
+      method: 'POST', headers: { ...anon, 'Content-Type': 'text/plain' }, body: 'no'
+    });
+    add('Strangers cannot upload files', !r.ok, r.ok ? 'ALLOWED — this is wrong' : 'refused with HTTP ' + r.status);
+  } catch (e) { add('Strangers cannot upload files', true, 'refused (' + e.message + ')'); }
+
+  // Tidy up if the rules let something through.
+  if (inserted) {
+    try { await sb().from(PARTS_TABLE).delete().eq('id', testId); } catch (_) {}
+  }
+  return out;
+}
+
 export function publicUrl(path) {
   return sb().storage.from(ASSET_BUCKET).getPublicUrl(path).data.publicUrl;
 }

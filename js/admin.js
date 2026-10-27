@@ -524,6 +524,13 @@ function paneLibrary() {
   pane.append(listWrap);
   listWrap.append(buildList());
 
+  pane.append(el('div', { class: 'group' },
+    el('h3', { text: 'Security check' }),
+    el('p', { class: 'tiny muted', text: 'Checks what a stranger with only the public key can do. Everything except the first line should say "no".' }),
+    el('button', { class: 'ghost', text: 'Run the check', onclick: runSecurityCheck, disabled: !isConfigured() }),
+    el('div', { id: 'secOut' })
+  ));
+
   function buildList() {
     const wrap = el('div', {});
     const q = search.trim().toLowerCase();
@@ -557,6 +564,33 @@ function paneLibrary() {
   }
 
   return pane;
+}
+
+async function runSecurityCheck() {
+  const out = $('secOut');
+  if (!out) return;
+  out.innerHTML = '';
+  out.append(el('p', { class: 'tiny muted', text: 'Checking…' }));
+  try {
+    const res = await Store.securityCheck();
+    out.innerHTML = '';
+    for (const r of res) {
+      out.append(el('div', { class: 'ver' },
+        el('span', { style: 'font-size:16px', text: r.pass ? '✅' : '❌' }),
+        el('div', { class: 'vmeta' },
+          el('div', { text: r.name }),
+          el('div', { class: 'tiny muted', text: r.detail }))
+      ));
+    }
+    const bad = res.filter(r => !r.pass).length;
+    out.append(el('p', {
+      class: 'tiny', style: 'color:' + (bad ? 'var(--danger)' : 'var(--ok)'),
+      text: bad ? bad + ' problem(s) — re-run Step 2 of SETUP.md.' : 'All good: the public key can read published parts and nothing else.'
+    }));
+  } catch (e) {
+    out.innerHTML = '';
+    out.append(el('p', { class: 'tiny', style: 'color:var(--danger)', text: 'Could not run the check: ' + e.message }));
+  }
 }
 
 function selectRecord(id) {
