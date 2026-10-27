@@ -1337,7 +1337,11 @@ async function boot() {
   // Start the camera straight away on a laptop; phones need the tap.
   if (!/iPhone|iPad|Android/i.test(navigator.userAgent)) openCamera();
 }
-boot();
+
+boot().catch(e => {
+  console.error('admin boot failed', e);
+  if (window.__fatal) window.__fatal('The admin page could not start', e && (e.stack || e.message) || String(e));
+});
 
 window.addEventListener('beforeunload', e => {
   if (isDirty()) { e.preventDefault(); e.returnValue = ''; }
