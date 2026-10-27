@@ -88,8 +88,9 @@ export function resolveTransform(rec, state, f) {
     y: rec.offset.y + state.dy + react.offset.y,
     z: rec.offset.z + react.offset.z,
     rot: { x: rec.rotation.x + react.rotation.x, y: rec.rotation.y + react.rotation.y, z: rec.rotation.z + react.rotation.z },
-    sx: total * react.scale.x,
-    sy: total * react.scale.y,
+    sx: total * react.scale.x * rec.stretch.x,
+    sy: total * react.scale.y * rec.stretch.y,
+    sz: total * react.scale.x * rec.stretch.z,
     opacity: react.opacity,
     visible: react.visible
   };

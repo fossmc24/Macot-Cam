@@ -80,6 +80,13 @@ export function normalizeRecord(r) {
     offset: vec3(r.offset),
     rotation: vec3(r.rotation),
     scale: num(r.scale, 1),
+    // Per-axis stretch on top of the uniform scale. A ring has to get wider
+    // without its band getting taller, which one number cannot express.
+    stretch: {
+      x: num(r.stretch && r.stretch.x, 1),
+      y: num(r.stretch && r.stretch.y, 1),
+      z: num(r.stretch && r.stretch.z, 1)
+    },
     pivot: { x: num(r.pivot && r.pivot.x, 0), y: num(r.pivot && r.pivot.y, 0) },
     mirror: !!r.mirror,
     followHeadTurn: r.followHeadTurn !== false,

@@ -13,7 +13,7 @@ import {
   SLOTS, blankSlot, toCanvas, dragToFaceUnits, hitCircle, instancesOf
 } from './placement.js';
 import { drawMascot, drawDots, drawSelection, thumb2D, thumbPlaceholder, getImage } from './render2d.js';
-import { createLayer, render3D, thumb3D, is3DRecord, clearThumbCache, loadGLTF } from './render3d.js';
+import { createLayer, render3D, thumb3D, is3DRecord, clearThumbCache, loadGLTF, measureModel } from './render3d.js';
 import { makeParts } from './library.js';
 import {
   normalizeRecord, builtinRecords, mergeRecords, newRecord, slugId,
@@ -605,6 +605,64 @@ function paneLibrary() {
   return pane;
 }
 
+// Size and place the selected part so it sits on the head on screen.
+// Everything is in face units, so the result holds on any face.
+function fitToHead() {
+  if (!current) return;
+  const src = source();
+  if (!src.face || !src.face.pts) { toast('Point the camera at a face first.', 'bad'); return; }
+
+  const part = (parts[current.slot] || []).find(p => p.id === current.id);
+  const box = is3DRecord(current, part) ? measureModel(layer, current, part) : flatBox(current, part);
+  if (!box || !(box.width > 0)) { toast('Could not measure this part — place it by hand.', 'bad'); return; }
+
+  // How wide the thing should end up, in face units — a nose and a hat want
+  // very different answers.
+  const TARGET = { head: 1.15, ears: 1.15, eyes: .8, nose: .28, mouth: .5, cheeks: .22, facial: .7 };
+  let target = TARGET[current.slot] || .8;
+  // A part drawn once per side is only ever that side's worth of art.
+  if (current.anchor.mode === 'side' || current.anchor.mode === 'pair') target *= .35;
+  const scale = target / box.width;
+
+  // Hats and ears rest ON the head; everything else centres on its landmark.
+  const onTop = current.slot === 'head' || current.slot === 'ears';
+
+  current.scale = +scale.toFixed(3);
+  current.stretch = { x: 1, y: 1, z: 1 };
+  current.offset.x = +(-box.center.x * scale).toFixed(3);
+  current.offset.y = +((onTop ? box.min.y : -box.center.y) * scale).toFixed(3);
+  // Sit it at the head's own depth rather than on the skin, so the hidden
+  // head shape can cover whatever passes behind.
+  current.offset.z = +((onTop ? -0.22 : 0) - box.center.z * scale).toFixed(3);
+  // Put the tap circle over where the art actually ends up. The model's own
+  // centre is in three.js coordinates (+y up); the record counts +y as down.
+  current.hit = {
+    cx: 0,
+    cy: +(current.offset.y - box.center.y * scale).toFixed(3),
+    r: +Math.max(.12, Math.max(box.width, box.height) * scale * .6).toFixed(3)
+  };
+
+  markDirty(); renderPane();
+  toast('Fitted. Nudge it from here.', 'good');
+}
+
+// Flat art has no model to measure: a billboard is one face unit wide at
+// scale 1, and a built-in draws itself inside its own tap circle.
+function flatBox(rec, part) {
+  if (rec.type === 'png' || rec.type === 'svg') {
+    const e = getImage(rec.assetUrl);
+    const aspect = e && e.ready ? (e.img.naturalWidth / e.img.naturalHeight) : 1;
+    const h = 1 / (aspect || 1);
+    return { width: 1, height: h, depth: 0,
+      min: { x: -.5, y: -h / 2, z: 0 }, max: { x: .5, y: h / 2, z: 0 },
+      center: { x: 0, y: 0, z: 0 } };
+  }
+  const r = rec.hit.r || .4;
+  return { width: r * 2, height: r * 2, depth: 0,
+    min: { x: -r, y: -r, z: 0 }, max: { x: r, y: r, z: 0 },
+    center: { x: 0, y: -rec.hit.cy, z: 0 } };
+}
+
 async function exportFlow() {
   try {
     const dump = await Store.exportAll();
@@ -734,27 +792,50 @@ function panePlace() {
     })
   ));
 
+  // Fit it first, fiddle after.
+  pane.append(el('div', { class: 'group' },
+    el('h3', { text: 'Start from a good guess' }),
+    el('button', { class: 'primary', text: '✨ Fit it to my head', onclick: fitToHead }),
+    el('p', { class: 'tiny muted', text:
+      'Measures the part and sizes it to the face on screen, sitting it on your head. '
+      + 'Gets you close in one tap — then nudge it from there.' })
+  ));
+
+  // Each axis says which way it goes. Getting a sign backwards is the easiest
+  // mistake to make here, and the least obvious to spot.
   const off = el('div', { class: 'group' }, el('h3', { text: 'Offset (face units)' }));
-  for (const ax of ['x', 'y']) {
-    const r = numRow(ax.toUpperCase(), () => current.offset[ax], v => current.offset[ax] = v,
-      { min: -1.5, max: 1.5, hardMin: -10, hardMax: 10 });
-    placeRows.push(r); off.append(r);
+  const AXES = [
+    ['x', '← left · right →', { min: -1.5, max: 1.5, hardMin: -10, hardMax: 10 }],
+    ['y', '↑ up · down ↓', { min: -1.5, max: 1.5, hardMin: -10, hardMax: 10 }],
+    // Depth needs far more room: pushing a hat or crown back behind the head
+    // is a long way compared with nudging it sideways.
+    ['z', '← behind · in front →', { min: -4, max: 4, nudge: .02, hardMin: -20, hardMax: 20 }]
+  ];
+  for (const [ax, dirs, opts] of AXES) {
+    const r = numRow(ax.toUpperCase(), () => current.offset[ax], v => current.offset[ax] = v, opts);
+    placeRows.push(r);
+    off.append(r, el('p', { class: 'tiny muted', style: 'margin:-4px 0 2px 82px', text: dirs }));
   }
-  // Depth needs a lot more room than side-to-side: pushing a hat or a crown
-  // back far enough to sit AROUND the head is several face widths.
-  const rz = numRow('Z (depth)', () => current.offset.z, v => current.offset.z = v,
-    { min: -4, max: 4, nudge: .02, hardMin: -20, hardMax: 20 });
-  placeRows.push(rz); off.append(rz);
   off.append(el('p', { class: 'tiny muted', text:
-    'Z moves a part towards or away from the camera, so it only affects 3D parts. '
-    + 'More negative pushes it back behind your face — that is what makes a crown or a hat sit around your head instead of through it. '
-    + 'The hidden head shape then covers whatever goes behind it.' }));
+    'Negative Y moves a part UP; negative Z pushes it BEHIND your face. '
+    + 'Pushing a crown or a hat back is what makes it sit around your head rather than across it — '
+    + 'the hidden head shape then covers whatever goes behind. Z only affects 3D parts.' }));
   pane.append(off);
 
   const sc = el('div', { class: 'group' }, el('h3', { text: 'Size and turn' }));
   const sr = numRow('Scale', () => current.scale, v => current.scale = v,
     { min: .05, max: 4, step: .01, nudge: .01, digits: 2, hardMin: .01, hardMax: 30 });
   placeRows.push(sr); sc.append(sr);
+  // One number cannot fit a ring to a head: widening it would make the band
+  // taller too. These stretch each axis on top of the uniform scale.
+  for (const [ax, label] of [['x', 'Wider'], ['y', 'Taller'], ['z', 'Deeper']]) {
+    const r = numRow(label, () => current.stretch[ax], v => current.stretch[ax] = v,
+      { min: .2, max: 3, step: .01, nudge: .02, digits: 2, hardMin: .01, hardMax: 20 });
+    placeRows.push(r); sc.append(r);
+  }
+  sc.append(el('p', { class: 'tiny muted', text:
+    'Scale sizes the whole part. Wider / Taller / Deeper stretch one direction at a time — '
+    + 'that is how you make a crown wide enough to go round your head without the band growing tall.' }));
   for (const ax of ['x', 'y', 'z']) {
     const r = numRow('Rotate ' + ax.toUpperCase(), () => current.rotation[ax], v => current.rotation[ax] = v,
       { min: -Math.PI, max: Math.PI, step: .01, nudge: .02, digits: 2, hardMin: -12, hardMax: 12 });

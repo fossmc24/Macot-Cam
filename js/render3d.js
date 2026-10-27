@@ -165,7 +165,7 @@ export function render3D(layer, view, f, mirror) {
     o.outer.scale.set(S * ins.sx, S, S);                                      // sized to the face (mirrored on the left)
     o.inner.position.set(tr.x, -tr.y, tr.z);                                  // record offset + the user's drag
     o.inner.rotation.set(tr.rot.x, tr.rot.y, tr.rot.z);
-    o.inner.scale.set(tr.sx, tr.sy, tr.sx);
+    o.inner.scale.set(tr.sx, tr.sy, tr.sz);
     f.sx = ins.sx;
     if (o.model.userData && o.model.userData.update) o.model.userData.update(f);
     if (tr.opacity < 1) {
@@ -257,3 +257,25 @@ export function thumb3D(layer, rec, part, color, px = 60) {
 }
 
 export const is3DRecord = (rec, part) => rec.type === 'glb' || (rec.type === 'builtin' && part && part.three);
+
+// How big a 3D part is in its own right, in face units at scale 1.
+// Used to work out a sensible starting size and position for it.
+export function measureModel(layer, rec, part) {
+  if (!layer || !T) return null;
+  const model = buildModel(layer, rec, part);
+  if (!model) return null;
+  const holder = new T.Group();
+  holder.add(model);
+  holder.updateMatrixWorld(true);
+  const box = new T.Box3().setFromObject(holder);
+  if (!isFinite(box.min.x) || box.isEmpty()) { dispose3D(holder); return null; }
+  const size = box.getSize(new T.Vector3());
+  const center = box.getCenter(new T.Vector3());
+  dispose3D(holder);
+  return {
+    width: size.x, height: size.y, depth: size.z,
+    min: { x: box.min.x, y: box.min.y, z: box.min.z },
+    max: { x: box.max.x, y: box.max.y, z: box.max.z },
+    center: { x: center.x, y: center.y, z: center.z }
+  };
+}
